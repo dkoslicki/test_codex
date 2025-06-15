@@ -1,0 +1,691 @@
+% fix use of \sigma at the very end; give a new symbol like {\mathbb U}_{g}
+
+
+\documentclass[11pt,notitlepage,english]{article}
+
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{fullpage}
+\usepackage{amssymb}
+\usepackage{amsbsy}
+\usepackage{amsmath}
+\usepackage[parfill]{parskip}
+\usepackage{graphicx}
+\usepackage{pgfplotstable}
+\usepackage{tablefootnote}
+\usepackage{caption}
+\usepackage{soul}
+\usepackage{authblk}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{booktabs}
+
+\hypersetup{
+    colorlinks,
+    linkcolor={red!50!black},
+    citecolor={blue!50!black},
+    urlcolor={blue!80!black}
+}
+
+\renewcommand{\familydefault}{\sfdefault}
+
+\begin{document}
+\captionsetup{format=hang}
+
+\title{RareTarget: a machine-learning approach for learning molecular targets for rare disease therapies from Orphanet and RTX-KG2}
+
+\setlength{\affilsep}{1em}
+
+\author[1]{Amy~K.~Glen}
+\author[2,3]{David~Koslicki}
+\author[1,4]{Stephen~A.~Ramsey}
+\affil[1]{School of Electrical Engineering and Computer Science\protect\\
+  Oregon State University, Corvallis, Oregon USA\protect\\\mbox{ }}
+\affil[2]{Computer Science and Engineering\protect\\
+  Penn State University, State College, Pennsylvania USA\protect\\\mbox{ }}
+\affil[3]{Huck Institutes of the Life Sciences\protect\\
+  Penn State University, State College, Pennsylvania USA\protect\\\mbox{ }}
+\affil[4]{Department of Biomedical Sciences\protect\\
+  Oregon State University, Corvallis, Oregon USA\protect\\\mbox{ }}
+ 
+\maketitle
+
+\section{Preliminaries}
+\subsection{General mathematical notation}\label{sec:math}
+We'll denote the real numbers by ${\mathbb R}$, the nonnegative reals by
+${\mathbb R}_{\geq 0}$, the negative reals by ${\mathbb R}_{-}$, the positive
+integers by ${\mathbb N}$, and the set of positive integers less than or equal
+to $n \in {\mathbb N}$ by ${\mathbb N}_n$.  Other than the reals and the natural
+numbers, we'll denote sets by capital letters, like $S$.  For a discrete set
+$S$, we'll denote its cardinality by $|S|$.  We'll denote a set difference by
+using a left-leaning slash, like $A \setminus B$. We will denote maps by
+lower-case Greek letters, like $\mu$, or by English words or abbreviations like
+``logistic,'' ``log,'' ``Perm,'' or ``CEL''\@.  For any set $S$, we'll denote
+its power set by ${\mathcal P}(S)$.  For any discrete set $S$, let a {\em
+  permutation\/} of elements of $S$ be a bijection $\pi: S \rightarrow {\mathbb
+  N}_{|S|}$, i.e., $\pi$ is an indexing function that defines a total order on
+$S$.  We will denote the set of all permutations of elements of $S$ by
+$\textrm{Perm}(S)$.  We'll denote scalar numeric values (real or integer) with
+lower-case symbols, like $v$. Given a discrete set $S$, and $\pi \in
+\textrm{Perm}(S)$, we'll denote real-valued (or nonnegative real-valued) vectors
+corresponding to elements of $S$ ordered by $\pi$ as elements of ${\mathbb
+  R}^{|S|}$ (or ${({\mathbb R}_{\geq 0})}^{|S|}$) using bolded lower-case
+letters, like ${\boldsymbol z}$. We'll denote the length of a vector
+$\boldsymbol{z}$ (i.e., the dimension of the vector space) by $\dim({\boldsymbol
+  z})$.  For such a real-valued vector over the space of dimension equal to the
+cardinality of $S$, it will be convenient to refer to the ``component of
+$\boldsymbol{z}$ corresponding to element $s \in S$'', which will be understood
+to mean the $\pi(s)$\textsuperscript{th} component of $\boldsymbol{z}$; we will
+denote such a component by $[\boldsymbol{z}]_s$ or, for conciseness, $z_s$ (note
+here, $s$ is an element of $S$ and not an index set element). We will denote a
+map whose range is a Cartesian product space, by a boldfaced Greek letter, like
+$\boldsymbol{\chi}$. To be clear, $\boldsymbol{\chi}$ is not a point in a
+product space; rather, {\em its value for a given input\/} is a point in a
+vector space (hence the use of boldface). We will denote real-valued matrices
+over the space of dimension equal to the product of the cardinality of the
+discrete set $S_1$ and the cardinality of the discrete set $S_2$, with bolded
+upper-case letters, like ${\boldsymbol A}$. Assuming that the number of rows of
+a real-valued matrix is $|S_1|$ and the number of columns of the matrix is
+$|S_2|$, we will describe the matrix $\boldsymbol{A}$ as a ${\mathbb
+  R}^{|S_1|\cdot |S_2|}$ matrix.  Given a permutation $\pi_1(S_1)$ providing a
+correspondence between $S_1$ elements and ordering of rows, and a permutation
+$\pi_2(S_2)$ providing a correspondence between $S_2$ elements and ordering of
+columns, for any $s_1 \in S_1$ and $s_2 \in S_2$, we will denote the element of
+$\boldsymbol{A}$ in the $\pi_1(s_1)$\textsuperscript{th} row and the
+$\pi_2(s_2)$\textsuperscript{th} column by $A_{s_1,s_2}$. We will denote
+real-valued tensors with bolded upper-case letters with a tilde, like
+$\widetilde{\boldsymbol A}$. As with vectors and matrices, we will use set
+element based notation to refer to tensor components; for example, if
+$\widetilde{\boldsymbol A}$ is a ${\mathbb R}^{|S_1|\cdot |S_2| \cdot |S_3|}$
+tensor, given permutations $\pi_1(S_1)$, $\pi_2(S_2)$, and $\pi_3(S_3)$, for any
+elements $s_1 \in S_1$, $s_2 \in S_2$, and $s_3 \in S_3$, we'll denote the
+$(\pi_1(s_1), \pi_2(s_2), \pi_3(s_3))$ component of $\widetilde{\boldsymbol A}$
+by $A_{s_1,s_2,s_3}$. We'll denote the $L^2$~norm (i.e., Euclidean norm) of
+vector ${\boldsymbol v}$ by $||{\boldsymbol v}||_2$ and the $L^1$~norm by
+$||{\boldsymbol v}||_1$. We'll denote the open unit interval, the closed unit
+interval, and the left half-open unit interval by $(0,1)$, $[0,1]$, and $(0,1]$,
+  % chktex 9 respectively.  We'll abbreviate ``is defined by'' using the
+  equivalence ($\equiv$) symbol.  For a set $S$, we'll denote the arithmetic
+  mean of the values of a function $\mu: S \rightarrow {\mathbb R}$ over all
+  elements of $S$ using angle brackets, $\langle \mu(s) \rangle_{s \in S}$. For
+  any Cartesian product
+\begin{equation}
+  S \equiv S_1 \times \cdots \times S_n,
+\end{equation}
+we'll denote the projection map to the set $S_i$ by $\rho_{S_i}:S\rightarrow S_i$, where $\rho_{S_i}$ is defined by
+\begin{equation}
+\rho_{S_i}(s_1, \ldots, s_n) = s_i,
+\end{equation}
+where $(s_1, \ldots, s_n) \in S$. We'll denote a Cartesian product of elements
+of a set of sets $\{S_i\}$ over an index set $I$, by a $\prod_{i \in I} S_i$.
+For a Cartesian product $S_0 \times {( \prod_{i=1}^{l-1}{(S_i )})} \times S_l$
+(where $l \in {\mathbb N}$), we'll define the case $l = 1$ to mean $S_0 \times
+S_1$.  We'll denote the composition of two maps using the circle symbol $\circ$,
+like $\nu \circ \epsilon$.  We'll denote the diagonal matrix whose elements are
+the ordered elements of the vector ${\boldsymbol v}$ by
+$\textrm{diag}({\boldsymbol v})$. We'll denote real-valued hyperparameters by
+$u_1, u_2, u_3, \ldots$, and so on. We will denote parameter estimates or
+predicted values using a hat (e.g., $\widehat{u}_1$ as an estimate for
+hyperparameter $u_1$; and $\widehat{y}$ as a probabilistic prediction for label $y$).
+
+\subsection{Subject-specific mathematical symbols}
+ The key mathematical symbols for this method are summarized in
+ Table~\ref{table:symboldefs} (see Appendix).  Let $G$ be the set of all human
+ genes associated with disease-causing variants that are listed in the Orphanet
+ database; we'll assume that each gene is identified by an Ensembl gene
+ identifier, like {\em ENSG00000130158\/} (corresponding to the gene symbol {\em
+   DOCK6\/}). Let $D$ denote the set of all Orphanet diseases, each represented
+ by an Orphanet identifier like {\em ORPHA:974}.  Let $H$ denote the set of all
+ symptoms appearing in Orphanet, each identified by a Human Phenotype Ontology
+ (HPO) identifier like {\em HP:0002814}. Orphanet defines five symptom frequency
+ categories, like {\em rare\/} or {\em occasional\/}; we will denote the set of
+ frequency categories by $F$. Each Orphanet symptom frequency category
+ corresponds to a percentage range of symptom frequencies, for example, {\em
+   occasional\/} corresponds to the range $5--29$\%. We will simplify each
+ frequency category's percentage range by taking the midpoint and dividing by
+ 100, to get a ``fractional midpoint'' summary of the frequency category
+ (Table~\ref{table:freq}); for example, for the category {\em occasional}, the
+ fractional midpoint frequency would be 0.17.
+\begin{table}[!htb]
+  \begin{center}
+    \begin{tabular}{rrr} \toprule
+      frequency category & \hspace{0.5cm}\%~of cases & \hspace{0.5cm}fractional midpoint \\\midrule\midrule
+      always present & 100 & 1.00 \\\midrule
+      very frequent & 80--99 & 0.90 \\\midrule
+      frequent & 30--79 & 0.55 \\\midrule
+      occasional & 5--29 & 0.17 \\\midrule
+      rare & 1--4 & 0.02 \\\bottomrule
+    \end{tabular}
+    \caption{Symptom frequency categories as defined in the Orphanet database
+      (represented by the set $F$), along with
+      an approximate midpoint frequency for the frequency range (used to define
+      values for $\xi$; see Eq.~\ref{eq:psi}).}\label{table:freq}
+  \end{center}
+\end{table}
+Let $X \subset D \times H \times F$ denote a set of ordered triples of disease,
+symptom, and frequency category appearing in Orphanet. Let $\xi: F \rightarrow
+(0,1]$ % chktex 9 map each frequency category to the fractional midpoint of the
+  category's symptom frequency range, as shown in Table~\ref{table:freq}; for
+  example, $\xi(\textrm{\em occasional\/}) = 0.17$.  Let $\delta: G \rightarrow
+  {\mathcal P}(D)$ map a gene $g$ to the set of all diseases $d \in D$ for which
+  Orphanet annotates $g$ as being associated with disease $d$.  We will construct
+  the complete set of gene-symptom associations $Q \subset G \times H$ from
+  $\delta$ and $X$ by using $\delta$ to connect $g$ to a disease $d$ and $X$ to
+  connect $d$ to $h$, for various diseases $d \in D$, as follows:
+\begin{equation}
+  Q \equiv \{(g,h) \in G\times H \; | \; \exists \, d \in \delta(g) \; \textrm{and} \;
+    \exists \, f \in F 
+\;    \textrm{sth.} \; (d,h,f) \in X\}.
+\end{equation}
+In practice, $Q$ is a sparse subset of $G \times H$, because the average number of symptoms per gene (XXX) is much smaller
+then the total number, XXX, of symptoms in $H$.  We
+assume that every gene $g \in G$ appears as the first component of at
+least one element of $Q$. For $(g, h) \in Q$, let $\gamma:
+Q \rightarrow {\mathcal P}(F)$ map $(g, h)$ to the set of
+all frequency categories for occurrence of symptom $h$ for any disease that is
+listed in Orphanet as being associated with gene $g$,
+\begin{equation}
+\gamma(g,h) \equiv \{ f \in F \; | \; \exists \, d \in \delta(g) \; \textrm{sth.} \; (d, h, f) \in X\}.
+\end{equation}
+Further, let
+$\phi: G \times H \rightarrow (0,1]$ % chktex 9
+map
+$(g,h)$ to a ``maximum symptom frequency'' value for any disease caused by $g$ in
+the case where $h$ is a symptom of a disease caused by $g$,
+and to a global ``average symptom frequency'' in the case where
+$h$ is not a symptom of any disease caused by $g$,
+\begin{equation}
+  \phi(g,h) \equiv
+  \begin{cases}
+    \underset{f \in \gamma(g, h)}{\max} \; \xi(f),
+    & \textrm{if} \; (g,h) \in Q, \\
+    \langle \phi(g',h') \rangle_{(g',h') \in Q}, & \textrm{if} \;
+    (g,h) \not\in Q.
+  \end{cases}
+  \label{eq:psi}
+\end{equation}
+
+\subsection{Knowledge graph}
+
+Let $R$ denote the set of all Biolink predicate types in the knowledge
+graph, which is a labeled, directed multigraph $(N, E)$,
+with node set $N$ and predicate-labeled edge set
+$E \subset R \times N \times N$. Each node $n \in N$
+denotes a concept, such as a specific gene, a specific biological pathway, a
+specific biological process, or a specific symptom.  Let $C$ denote
+the set of all Biolink node types (i.e., ``categories'') corresponding to any
+node in $N$. Let $\kappa:N\rightarrow C$ map each
+node to its Biolink category.  The concept node set $N$ should be
+constructed such that (1)~a gene and the protein that it encodes, are identified
+as the same ``gene'' node in the graph (with category {\em biolink:Gene\/}); and
+(2)~concepts referring diseases, such as MONDO or ORPHA identifiers, are {\em
+  not included in the graph's set of nodes}.  We will assume that $G
+\subset N$ and $H \subset N$ (in practice, if
+there is a gene $g$ or a symptom $h$ in Orphanet that is not in the knowledge
+graph, we can drop the element from $G$ or $H$ and we can
+drop all elements of $Q$ containing $g$ or $h$). Let
+$\widetilde{\boldsymbol A} \in {\{ 0, 1 \}}^{|R| \cdot |N|
+  \cdot |N|}$ denote the knowledge graph's adjacency tensor, which is
+defined by
+\begin{equation}
+  A_{r,n,n'} \equiv \begin{cases}
+    1 & \textrm{if} \; (r, n, n') \in E, \\
+    0 & \textrm{if} \; (r, n, n') \not\in E.
+    \end{cases}
+\end{equation}
+In this work, we are concerned with simple paths through the knowledge graph
+that originate at a node from $G$ and that end at a symptom from $H$.  Thus,
+we'll define a {\em path\/} in the knowledge graph to be an ordered pair
+$({\boldsymbol n},{\boldsymbol r}) \in (G \times {( N^{\,l-1} )} \times H)
+\times R^{\,l}$ of length $l$ hops, where $l \in {\mathbb N}$, ${\boldsymbol n}$
+denotes the node sequence, and ${\boldsymbol r}$ denotes the sequence of
+predictes (i.e., relationship types) for the edges connecting the nodes. It must
+be the case that for all $i \in \{1, \ldots, l\}$, the path components satisfy
+$(r_i, n_{i}, n_{i+1}) \in E$. Since we are looking to extract intermediate node
+weights, in the formulation of our model for predicting $(g,h)$ pairs, we will
+only consider paths whose lengths are in the range $\{2, \ldots, m\}$, where $m$
+is a maximum path length that we will have to choose; in practice, we will
+constrain paths to at most four hops by choosing $m=4$.
+
+\section{Model definition and training}
+Based on the gene-symptom associations $Q$ from Orphanet, the
+symptom frequencies $\gamma$ (for gene-symptom pairs) from Orphanet, and the
+knowledge graph ${\boldsymbol A}$, we aim to learn node weights and relationship type weights that
+enable a path-based model to predict assocations between disease genes and the
+diseases' associated symptoms.  More precisely, we desire to train a model that
+for a gene $g \in G$ and symptom $h \in H$, will output an
+``edge'' association score $z_{g,h} \in {\mathbb R}$ for the pair $(g, h)$.
+(We will explain below in Section~\ref{sec:modelz} how
+$z_{g,h}$ will actually be computed). We'll denote the probability corresponding
+to $z_{g,h}$ (via the logistic function) by $\widehat{y}_{g,h} \in (0,1)$,
+\begin{equation}
+  \label{eq:defyhat}
+  \widehat{y}_{g,h} \equiv \textrm{logistic}(z_{g,h}) = \frac{1}{1 + e^{-z_{g,h}}}.
+\end{equation}
+The value $z_{g,h}$ for a given pair $(g,h)$ will depend on various high-dimensional
+model parameters and hyperparameters, which are not shown in the notation $z_{g,h}$,
+but which will in practice be needed in order to compute a value $z_{g,h}$ for a given pair $(g,h)$.
+We will discuss each of these types of parameters in turn, next.
+
+\subsection{Model training set}
+In order to train a model for computing $z_{g,h}$, we will need a contrastive set
+of training examples.  By ``contrastive set'', we mean a
+set $T \subset G\times H$ of gene-symptom pairs 
+that include real gene-symptom associations (from $Q$, i.e.,
+``positive'' examples) and gene-symptom pairs for which there is no disease for
+which the gene is caually associated with the symptom (i.e., pairs not in
+$Q$, or ``negative'' examples). It will be convenient to give a label
+for the disjoint subsets of $T$ that are positive examples ($T_{+}$) and negative examples
+($T_{-}$), such that
+\begin{align}
+  T_{+} &\equiv T \cap Q, \\
+  T_{-} &\equiv T - T_{+}.
+\end{align}
+It is necessary that the positive examples in $T$ comprise only a
+subset of $Q$, in order to be able to determine how well the model can
+predict the ``class label'' (associated in Orphanet, or not) on gene-symptom
+pairs that were not seen during training.  To represent the class label for each
+gene pair $(g,h) \in T$, we'll define an indicator $y_{g,h}$ as
+follows:
+\begin{equation}
+  y_{g,h} \equiv
+  \begin{cases}
+    1 & \textrm{if} \; (g,h) \in Q, \\
+    0 & \textrm{if} \; (g,h) \not\in Q.
+  \end{cases}
+\end{equation}
+We will also need a way to map between a gene $g$ and the set of all symptoms
+that are paired with the gene (either through positive-class or negative-class examples)
+in any element of $T$. Let $G_T \subset G$ be the set of
+genes from any element of $T$, i.e.,
+\begin{equation}
+  G_T \equiv \{ \rho_G(t) \; | \; t \in T\},
+\end{equation}
+and similarly $G_{T_{+}}$ be the set of genes from any element of $T_{+}$.
+Let $\sigma: G_T \rightarrow {\mathcal P}(H)$ map a gene $g$
+to the set of all symptoms paired with $g$ in $T$, i.e.,
+\begin{equation}
+\sigma(g) \equiv \{ \rho_H(t) \; | \; t \in T \; \textrm{and} \; g = \rho_G(t) \}.
+\end{equation}
+Note that this includes both symptoms that are caused by disease gene $g$ {\em and\/}
+symptoms that are not caused by disease gene $g$ (i.e., pairs $(g,h) \not\in
+Q$).  For use in the prediction stage of the approach
+(Section~\ref{sec:pred}), we will also need to define a function $\sigma_{+}:
+G_{T_{+}} \rightarrow {\mathcal P}(H)$ that maps a gene $g$ to the
+set of all symptoms caused by variants in $g$ (i.e., symptoms connected to $g$
+via positive examples in $T$),
+\begin{equation}
+\sigma_{+}(g) \equiv \{ \rho_H(t) \; | \; t \in T_{+} \; \textrm{and} \; g = \rho_G(t)\}.
+\end{equation}
+Let $\epsilon:G_T \rightarrow {\mathcal P}(N)$ map
+a gene $g$ to the set of all nodes traversed by simple paths\footnote{This means
+that $g \not\in \epsilon(g)$ for any $g \in G_T$, since
+simple paths by definition do not contain cycles.} (through the knowledge graph
+$(N, E)$) of length at most $m$ starting from gene $g$ and
+terminating on a symptom in $\sigma(g)$. Let the set of gene nodes within
+the knowledge graph be denoted by $N_G$,
+\begin{equation}
+  N_G \equiv \{ n \in N \; | \; \kappa(n) = \textrm{\em biolink:Gene\/}\}.
+\end{equation}
+Let $\nu:{\mathcal P}(N)\rightarrow {\mathcal P}(N_G)$ map a set of nodes
+to the subset that are genes, i.e., whose categories are {\em biolink:Gene},
+\begin{equation}
+  \nu(S \subset N) \equiv S \cap N_G.
+\end{equation}
+We'll define the composition map $\alpha \equiv (\nu \circ \epsilon): G_T \rightarrow {\mathcal P}(N_G)$, which maps a disease
+gene $g$ to the set of intermediate nodes of type gene that are traversed by
+paths up to length $m$ from $g$ to associated symptoms.  Let $C_T$ denote the set of categories of nodes that are reachable by
+paths of up to length $m$ with pairs $(g,h)$ of starting and ending nodes that
+are contained in $T$ ({\em excluding\/} the category {\em biolink:Gene\/}),
+\begin{equation}
+  C_T \equiv \{ \kappa(n) \; | \; \exists \, g \in G_T
+  \;\, \textrm{sth} \;\, n \in \epsilon(g) \} \setminus \{ \textrm{\em biolink:Gene\/} \}.
+\end{equation}
+
+\subsection{Node category weights $\boldsymbol{k}$}
+Based on an ordering selected arbitrarily from $\textrm{Perm}(C_T)$,
+let the vector $\boldsymbol{k} \in {\mathbb R}_{\geq  0}^{|C_T|}$
+represent node category weights, which will be universal for our model (i.e.,
+this set will not be learned separately for each disease gene $g$). We'll denote
+by $k_c$ the component of $\boldsymbol{k}$ corresponding to category $c$.
+
+\subsection{The gene node weights ${\boldsymbol t}^{(g)}$}
+Given a gene $g \in G_T$, based on a fixed ordering selected
+arbitrarily from $\textrm{Perm}(\alpha(g))$, let the vector ${\boldsymbol
+  t}^{(g)} \in {({\mathbb R}_{\geq 0})}^{|\alpha(g)|}$ represent node weights
+for intermediate nodes of type gene for gene-to-symptom paths through the
+knowledge graph that start at the gene $g$.  We'll denote the component of
+$\boldsymbol{t}^{(g)}$ corresponding to node $n \in \alpha(g)$ as ${t^{(g)}}_n$.
+
+\subsection{The node weights}
+For each gene $g \in G_T$, we'll arbitrarily pick a fixed ordering $\pi^{(g)} \in
+\textrm{Perm}(\epsilon(g))$. Also for each such gene $g$, let
+us define
+$\boldsymbol{\chi}:
+       {({\mathbb R}_{\geq 0})}^{|\alpha(g)|} \times {({\mathbb R}_{\geq  0})}^{|C_T|}
+        \rightarrow {({\mathbb R}_{\geq 0})}^{|\epsilon(g)|}$ such that for any
+$n \in \epsilon(g)$, 
+\begin{equation}
+  {[\boldsymbol{\chi}({\boldsymbol t}^{(g)}, {\boldsymbol k})]}_n
+   \equiv
+  \begin{cases}
+    {t^{(g)}}_n & \textrm{if} \;\, n \in \alpha(g), \\
+    k_{\kappa(n)} & \textrm{otherwise},
+  \end{cases}
+\end{equation}
+where $\pi^{(g)} \in \textrm{Perm}(\epsilon(g))$ is the ordering of the
+dimensions of the range of $\boldsymbol{\chi}$.
+
+\subsection{The relationship type or ``predicate'' weight $({\boldsymbol w})$ parameter vector}
+Let ${\boldsymbol w} \in {({\mathbb R}_{\geq 0})}^{|R|}$ be a vector set of
+relationship type (a.k.a.\ ``predicate'') weights.  Let
+${\boldsymbol A}^{({\boldsymbol w})} \in {{\mathbb R}_{\ge 0}}^{|N| \cdot |N|}$ denote the 
+weighted adjacency matrix of the graph in which each edge has been weighted
+by its predicate according to the predicate weight vector ${\boldsymbol w}$,
+calculated as an inner product,
+\begin{equation}
+{\boldsymbol A}^{({\boldsymbol w})} \equiv {\boldsymbol w} \cdot \widetilde{\boldsymbol A},
+\end{equation}
+or equivalently, with an explicit summation,
+\begin{equation}
+{[{\boldsymbol A}^{({\boldsymbol w})}]}_{n,n'} \equiv \sum_{r \in R} w_r \; {[\widetilde{\boldsymbol A}]}_{r,n,n'}.
+\end{equation}
+The predicate weight vector ${\boldsymbol w}$ is one of the key outputs of the
+model training that we will carry out based on Orphanet data, in Section~\ref{sec:learnwf}. For any $g \in G_T$ and
+${\boldsymbol w} \in {({\mathbb R}_{\geq 0})}^{|R|}$,
+let ${\boldsymbol A}^{({\boldsymbol w}, g)}$ denote a
+  ${({\mathbb R}_{\geq 0})}^{|\epsilon(g)|\cdot|\epsilon(g)|}$ matrix whose row and
+column index orderings are $\pi^{(g)}$, and whose components satisfy:
+\begin{equation}
+  {[{\boldsymbol A}^{({\boldsymbol w},g)}]}_{n,n'} \equiv
+  \begin{cases}
+    {[{\boldsymbol A}^{({\boldsymbol w})}]}_{n,n'} & \textrm{if} \;\, n \in \epsilon(g) \;\,
+    \textrm{and} \;\, n' \in \epsilon(g), \\
+      0 & \textrm{otherwise}.
+  \end{cases}
+\end{equation}
+  In other words, ${\boldsymbol A}^{({\boldsymbol w},g)}$ is a projection of
+  ${{\boldsymbol A}^{({\boldsymbol w})}}$ to the square submatrix whose rows
+  and columns correspond to elements of $\epsilon(g)$ with ordering $\pi^{(g)}$.
+
+\subsection{Modeling the real-valued $(g,h)$ edge associations $z_{g,h}$}\label{sec:modelz}
+Given $g \in G_T$, ${\boldsymbol k}$, ${\boldsymbol w}$,
+${\boldsymbol t}^{(g)}$, and
+${\boldsymbol A}^{({\boldsymbol w}, g)}$, we will compute the $(g,h)$ edge association score
+$z_{g,h} \in {\mathbb R}$ as the value of a function
+$\zeta_{g,h}:
+{({\mathbb R}_{\geq 0})}^{|\alpha(g)|} \times
+{({\mathbb R}_{\geq 0})}^{|C_T|} \times
+{({\mathbb R}_{\geq 0})}^{|R|} \times
+{\mathbb R}_{-} \rightarrow {\mathbb R}$,
+\begin{align}
+  z_{g,h} &\equiv \zeta_{g,h}({\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+   f), \label{eq:defzgs} \\
+ \zeta_{g,h}({\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+      f)   & \equiv
+      \sum\limits_{l = 2}^{m} {\left[
+        {\boldsymbol A}^{({\boldsymbol w},g)}
+          {\left(\textrm{diag}(
+            \boldsymbol{\chi}({\boldsymbol t}^{(g)}, {\boldsymbol k})
+            ) \, {\boldsymbol A}^{({\boldsymbol w},g)}
+      \right)}^{l-1}\right]}_{h,g} + f, 
+  \label{eq:master}
+\end{align}
+ where $f \in {\mathbb R}_{-}$ is a scalar offset that corresponds to the
+ baseline log-odds of an association (via some disease in Orphanet) between $g$
+ and $h$ if there are no paths between them in the knowledge graph. In our
+ approach, the value of $f$ will be learned as a model parameter.  In
+ Eq.~\ref{eq:master}, the form ${(\textrm{diag}(\boldsymbol{\chi}({\boldsymbol
+     t}^{(g)}, {\boldsymbol k}) ) \, {\boldsymbol A}^{({\boldsymbol w},g)}
+   )}^{l-1}$ denotes $l-1$ alternating matrix multiplications of the diagonal
+ node weight matrix $\textrm{diag}(\boldsymbol{\chi}({\boldsymbol t}^{(g)},
+ {\boldsymbol k}))$ and the edge-weighted adjacency matrix ${\boldsymbol
+   A}^{({\boldsymbol w},g)}$.  That is,
+\begin{equation}
+{\left(\textrm{diag}(\boldsymbol{\chi}({\boldsymbol t}^{(g)}, {\boldsymbol k}) )
+  \; {\boldsymbol A}^{({\boldsymbol w},g)} \right)}^{l-1} = \,
+\textrm{diag}(\boldsymbol{\chi}({\boldsymbol t}^{(g)}, {\boldsymbol k})) \;
+  {\boldsymbol A}^{({\boldsymbol w},g)} \;
+  \textrm{diag}(\boldsymbol{\chi}({\boldsymbol t}^{(g)}, {\boldsymbol k}))
+    \, {\boldsymbol A}^{({\boldsymbol w},g)} \cdots,
+\end{equation}
+with $l-1$ total factors (including $l-1$ instances of
+$\textrm{diag}(\boldsymbol{\chi})$ and $l-1$ instances of ${\boldsymbol
+  A}^{({\boldsymbol w},g)}$), and where multiplication proceeds from right to
+left.
+Let us define a function
+$\upsilon_{g,h}: {({\mathbb R}_{\geq 0})}^{|\alpha(g)|} \times {({\mathbb R}_{\geq 0})}^{|C_T|} \times {({\mathbb R}_{\geq 0})}^{|R|} \times {\mathbb R}_{-} \rightarrow (0,1)$,
+as follows:
+\begin{equation}\label{eq:upsilon}
+\upsilon_{g,h} \equiv \textrm{logistic} \circ \zeta_{g,h}.
+\end{equation}
+We can then model the probability predictions
+by combining
+Eq.~\ref{eq:defyhat},
+Eq.~\ref{eq:defzgs},
+Eq.~\ref{eq:master}, and
+Eq.~\ref{eq:upsilon}, 
+\begin{align}
+  \widehat{y}_{g,h} & \equiv \upsilon_{g,h}({\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+  f) \\
+  &=
+\frac{1}{1 + e^{-\zeta_{g,h}({\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+  f)}}.
+\end{align}
+Let $\psi: G\rightarrow {\mathbb R}_{\geq 0}$ map a gene $g \in G$ to
+a per-gene weight normalization value that we define by
+\begin{equation}
+\psi(g) \equiv \sum_{h \in \sigma(g)} \phi(g,h).
+\end{equation}
+
+\subsection{The target-finding model's causal gene-specific objective function}
+Let $\textrm{CEL}: \{0,1\} \times (0,1) \rightarrow {\mathbb R}_{\geq 0}$ denote the cross-entropy loss
+between a binary class label $y \in \{0,1\}$ and a continuous-valued prediction
+$\widehat{y} \in (0,1)$,
+\begin{equation}
+\textrm{CEL}(y, \, \widehat{y}) \equiv -y \log(\widehat{y}) - (1-y) \log(1-\widehat{y}).
+\end{equation}
+For a given $g \in G_T$, we will construct a gene-specific objective
+function
+$\lambda^{(g)}: {({\mathbb R}_{\geq 0})}^{|\alpha(g)|} \times {({\mathbb R}_{\geq 0})}^{|C_T|} \times {({\mathbb R}_{\geq 0})}^{|R|} \times {\mathbb R}_{-} \rightarrow {\mathbb R}_{\geq 0}$
+as the sum of a weighted average prediction loss (over symptoms
+in $\sigma(g)$) and an elastic net regularization of ${\boldsymbol t}^{(g)}$
+with respective $L^1$ and $L^2$ penalty coefficients $u_1 \in {\mathbb R}_{\geq
+  0}$ and $u_2 \in {\mathbb R}_{\geq 0}$,
+\begin{equation}
+  \label{eq:lambdag}
+  \lambda^{(g)}(
+{\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+f) \equiv  \frac{1}{\psi(g)}
+  \sum\limits_{h \in \sigma(g)}
+  \left[ \phi(g, h)\, \textrm{CEL}\!\left(y_{g,h}, \, \widehat{y}_{g,h} \right) \right]  +  
+  \frac{u_1}{|\alpha(g)|} ||{\boldsymbol
+    t}^{(g)}||_1
+  + \frac{u_2}{|\alpha(g)|} {\bigl(||{\boldsymbol t}^{(g)}||_2\bigr)}^2.
+\end{equation}
+Using Eq.~\ref{eq:upsilon}, we can express the above as
+\begin{multline}
+  \label{eq:lambdag}
+  \lambda^{(g)}(
+{\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+f) \equiv  \frac{1}{\psi(g)}
+  \sum\limits_{h \in \sigma(g)}
+  \left[ \phi(g, h)\, \textrm{CEL}\!\left(y_{g,h}, \, \upsilon_{g,h}(
+{\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w},
+f)\right) \right]  + \\
+  \frac{u_1}{|\alpha(g)|} ||{\boldsymbol
+    t}^{(g)}||_1
+  + \frac{u_2}{|\alpha(g)|} {\bigl(||{\boldsymbol t}^{(g)}||_2\bigr)}^2.
+\end{multline}
+
+\subsection{The target-finding models's overall (across causal genes) obj.~function}
+
+We'll denote the concatenation of all of the components of all of
+the vectors ${\boldsymbol t}^{(g)}$ over all $g \in G_T$, by
+$\boldsymbol{t} \in {({\mathbb R}_{\geq 0})}^{\sum_{g \in G_T} |\alpha(g)|}$. Note that
+\begin{equation}
+\dim({\boldsymbol t}) = \sum_{g \in G_T} |\alpha(g)|.
+\end{equation}
+Then our overall symptom-frequency-weighted objective function
+$\lambda: {({\mathbb R}_{\geq 0})}^{\dim({\boldsymbol t})} \times {({\mathbb R}_{\geq 0})}^{|C_T|} \times {({\mathbb R}_{\geq   0})}^{|R|} \times {\mathbb R}_{-} \rightarrow {\mathbb R}_{\geq 0}$
+ is defined by an average of
+ $\lambda^{(g)}$ over $g \in G_T$, plus a squared $L^2$ regularization
+ of weight vector ${\boldsymbol k}$ with coefficient $u_3 \in {\mathbb R}_{\geq 0}$
+ plus a squared $L^2$ regularization of
+weight vector ${\boldsymbol w}$ with coefficient $u_4 \in {\mathbb R}_{\geq 0}$,
+\begin{equation}
+ \lambda({\boldsymbol t}, {\boldsymbol k}, {\boldsymbol w}, f) \equiv \left[\frac{1}{|G_T|}
+  \sum\limits_{g \in G_T} \lambda^{(g)}({\boldsymbol t}^{(g)}, {\boldsymbol k}, {\boldsymbol w}, f)\right] +  
+  \frac{u_3}{|C_T|} {(||{\boldsymbol k}||_2)}^2 +
+  \frac{u_4}{|R|} {(||{\boldsymbol w}||_2)}^2,
+\end{equation}
+which expands (using the definition in Eq.~\ref{eq:lambdag}) to,
+\begin{multline}
+  \lambda({\boldsymbol t}, {\boldsymbol k}, {\boldsymbol w}, f) = \frac{1}{|G_T|}
+  \sum\limits_{g \in G_T}  \Biggl\{ \frac{1}{\psi(g)}
+  \sum\limits_{h \in \sigma(g)}
+  \left[ \phi(g, h)\, \textrm{CEL}\!\left(y_{g,h}, \; \upsilon_{g,h}({\boldsymbol
+      t}^{(g)},{\boldsymbol k},{\boldsymbol w},f)\right) \right] + \\
+  \frac{u_1}{|\alpha(g)|} ||{\boldsymbol
+    t}^{(g)}||_1
+  + \frac{u_2}{|\alpha(g)|} {\bigl(||{\boldsymbol t}^{(g)}||_2\bigr)}^2 \Biggr\} +
+  \frac{u_3}{|C_T|} {(||{\boldsymbol k}||_2)}^2 +
+  \frac{u_4}{|R|} {(||{\boldsymbol w}||_2)}^2.
+\end{multline}
+
+\subsection{For fixed $(u_1,u_2,u_3,u_4)$ hyperparameters, find $(\widehat{\boldsymbol k}, \widehat{\boldsymbol w}, \widehat{f})$}\label{sec:learnwf}
+We will very likely want to dedicate a subsect of gene-disease associations (the
+``training set''), to the task of learning $({\boldsymbol t}, {\boldsymbol k}, {\boldsymbol w}, f)$.
+For fixed hyperparameters $(u_1, u_2, u_3, u_4)$, we can try to
+estimate the model parameters $({\boldsymbol t}, {\boldsymbol k}, {\boldsymbol w}, f)$ by
+minimizing the overall loss function,
+\begin{equation}
+  (\widehat{\boldsymbol t}, \widehat{\boldsymbol k}, \widehat{\boldsymbol w}, \widehat{f}) = \underset{({\boldsymbol
+      t},{\boldsymbol k},{\boldsymbol w},f)}{\textrm{argmin}} \; \lambda({\boldsymbol t}, {\boldsymbol k},{\boldsymbol w}, f),
+  \label{eq:optqw}
+\end{equation}
+probably with high node weight penalization coefficients $u_1$ and $u_2$ since
+${\boldsymbol t}$ is $\sum_g |\alpha(g)|$-dimensional (i.e.,
+extremely high-dimensional). The goal at this stage is to get good estimates
+$\widehat{\boldsymbol k}$, $\widehat{\boldsymbol w}$ and $\widehat{f}$, and the likely sparse resulting estimate
+$\widehat{\boldsymbol t}$ on the training set would be discarded.
+
+\section{Given $(\widehat{\boldsymbol k}, \widehat{\boldsymbol w}, \widehat{f})$, predict targets for a specific causal gene $g$}\label{sec:pred}
+With $\widehat{\boldsymbol w}$ and $\widehat{f}$ estimated, the model can (hopefully) be
+used for prediction for targets for a rare disease caused by a specific gene
+$g \in G$. Here, ``prediction'' amounts to scoring each possible intermediate
+node $n \in \alpha(g)$ for its relevance as a mediator between $g$ and all the
+symptoms $\sigma_{+}(g) \subset H$. More formally, for any $g \in
+G$ such that $(g,h) \not\in T$ for any $h \in H$,
+and given symptoms $\sigma_{+}(g)$ for gene $g$, and a set of symptoms that we would
+randomly sample that are {\em not\/}
+associated with the rare disease caused by $g$ (together denoted by the set $\sigma(g)$),
+and given that $y_{g,h}$ is defined as one for $h \in \sigma_{+}(g)$ and 0 otherwise, 
+we could predict our intervention
+targets by looking for high-scoring components of the (length $|\alpha(g)|$)
+vector $\widehat{\boldsymbol t}^{(g)}$; we would estimate that vector by:
+\begin{equation}
+  \widehat{\boldsymbol t}^{(g)} = \underset{{\boldsymbol t}^{(g)}}{\textrm{argmin}}
+  \biggl[
+    \lambda^{(g)}\bigl({\boldsymbol t}^{(g)},\widehat{\boldsymbol k},\widehat{\boldsymbol w},\widehat{f}\bigr)
+    \biggr].
+\end{equation}
+We can obtain the equation for predicting the nodes that are likely mediators of causal
+paths between causal gene $g$ and symptoms $\sigma(g)$ by using Eq.~\ref{eq:lambdag}, 
+\begin{multline}
+  \label{eq:nodeweights}
+  \lambda^{(g)}({\boldsymbol t}^{(g)}, \widehat{\boldsymbol k},
+  \widehat{\boldsymbol w}, \widehat{f}) =  \frac{1}{\psi(g)}
+  \sum\limits_{h \in \sigma(g)} \left[
+   \phi(g, h)\, \textrm{CEL}\!\left(y_{g,h}, \upsilon_{g,h}({\boldsymbol
+     t}^{(g)},\widehat{\boldsymbol k}, \widehat{\boldsymbol w},\widehat{f})\right) \right] + \\
+  \frac{u_1}{|\alpha(g)|}
+  ||{\boldsymbol t}^{(g)}||_1
+  + \frac{u_2}{|\alpha(g)|} {(||{\boldsymbol t}^{(g)}||_2)}^2.
+\end{multline}
+Finding $\textrm{argmin}_{{\boldsymbol t}^{(g)}} (\lambda^{(g)})$ will involve computing the gradient component
+\begin{equation}
+  \frac{\partial \lambda^{(g)}}{\partial t^{(g)}_n}({\boldsymbol t}^{(g)}, \widehat{\boldsymbol k}, \widehat{\boldsymbol w}, \widehat{f}),
+\end{equation}
+which involves computing (for each $l$) the gradient components (for all $n \in \alpha(g)$),
+\begin{equation}
+  \frac{\partial}{\partial t^{(g)}_n}{\left[
+        {\boldsymbol A}^{({\boldsymbol w},g)}
+      {\left(\textrm{diag}(\boldsymbol{\chi}({\boldsymbol t}^{(g)},{\boldsymbol k})) \,
+        {\boldsymbol A}^{({\boldsymbol w},g)}
+     \right)}^{l-1}\right]}_{h,g}.
+\end{equation}
+That gradient calculation may have to be done numerically unless we can find an analytic approach.
+
+\section{Possible extensions}
+There are a couple of ways the above-described method might be extended:
+\begin{enumerate}
+  \item Maybe there is also a way to work in a generic ``prior'' on ${\boldsymbol t}$,
+    by node category type, using Bayesian methods. Have to think about how that could be done, though.
+  \item We might need incorporate a path-length-specific weights,
+    ${\boldsymbol h} \in {\mathbb R}^{(m-1)}$, into Eq.~\ref{eq:master}.
+\end{enumerate}
+
+\section{Questions to explore}
+\begin{enumerate}
+\item If we partition the set of symptoms $\sigma_{+}(g)$ that are associated with gene $g$ into two sets $S_1$ and $S_2$
+  of equal size, and if we calculate (using Eq.~\ref{eq:nodeweights}) two different node weight vectors
+  ${\boldsymbol t}^{(g)}_1$ and ${\boldsymbol t}^{(g)}_2$ from $S_1$ and $S_2$, we could measure the correlation
+  $\textrm{cor}({\boldsymbol t}^{(g)}_1, {\boldsymbol t}^{(g)}_2)$ and test its significance vs.\ a null model.
+\end{enumerate}
+
+\appendix
+
+\section{Supplementary Information}
+\begin{table}[!htb]
+  \begin{center}
+      {\tiny 
+    \begin{tabular}{cll}\toprule
+      symbol & definition in plain English & example or symbolic definition \\\midrule\midrule
+      $G$ & all genes appearing in Orphanet & {\em ENSG00000130158\/} \\\midrule
+      $D$ & all diseases appearing in Orphanet & {\em ORPHA:974\/} \\\midrule
+      $H$ & all symptoms appearing in Orphanet & {\em HP:0002814\/} \\\midrule
+      $F$ & all Orphanet symptom frequency categories & {\em occasional\/} \\\midrule
+      $Q$ & all gene-symptom associations (``links'') in Orphanet & $(\textrm{\em \/ENSG00000102967}, \textrm{\em \/HP:0000378})$ \\\midrule
+      $T$ & training set $T \subset G\times H$ &  $(\textrm{\em \/ENSG00000102967}, \textrm{\em \/HP:0000378})$ \\\midrule
+      $T_{+}$ & training set of positive examples & $T \cap L$  \\\midrule
+      $T_{-}$ & training set of negative examples & $T - T_{+}$  \\\midrule
+      $G_T$ & genes appearing in the training set $T$ &  {\em ENSG00000102967\/} \\\midrule
+      $N$ & concept nodes in the knowledge graph &  {\em ENSG00000130158}, {\em GO:0032303}, {\em R-HSA-211979\/} \\\midrule
+      $E$ & predicate-labeled edges in the knowledge graph &
+      $(\textrm{\em \/ENS00000102967}, \textrm{\em \/HP:0003376}, \textrm{\em \/biolink:affects})$ \\\midrule
+      $R$ & Biolink predicate types in the knowledge graph & {\em biolink:causes\/} \\\midrule
+      $C$ & Biolink node types (``categories'') in the knowledge graph & {\em biolink:Gene\/} \\\midrule
+      $C_T$ & categories of intermediate nodes in the graph & {\em biolink:Gene}, {\em biolink:Pathway}, {\em biolink:BiologicalProcess\/} \\\midrule
+      $M$ & ``mediator'' nodes traversed by $g \rightarrow \cdots \rightarrow s$ paths & \\\midrule
+      $N_G$ & all gene nodes in the knowledge graph & {\em ENSG00000130158\/} \\\midrule
+      $\widehat{y}_{g,h}$ & predicted probability that $(g,h) \in L$ & $\widehat{y}_{g,h} \in (0,1)$ \\\midrule
+      $\sigma$ & maps gene $g$ to the set of all associated symptoms in $T$ & \\\midrule
+      $\sigma_{+}$ & maps gene $g$ to the set of all associated symptoms in $T_{+}$ & \\\midrule
+      $\kappa$ & maps a node $n$ to the node's Biolink category &
+      $\kappa(\textrm{\em ENSG00000130158\/}) = \textrm{\em biolink:Gene\/}$ \\\midrule
+      $\rho_S$ & projection map to the $S$ component of a tuple & $\rho_{S_i}(s_1, \ldots, s_n) = s_i$ \\\midrule
+      $\gamma$ & maps gene-symptom pair to frequencies & $\gamma(\textrm{\em \/ENSG00000001626}, \textrm{\em \/HP:0002783}) \rightarrow \{\textrm{\em \/occasional}, \textrm{\em \/frequent}\}$ \\\midrule
+      $\phi$ &map gene-symptom pair to max frequency & $\phi(\textrm{\em \/ENSG00000001626}, \textrm{\em \/HP:0002783}) \rightarrow \textrm{\em \/frequent}$ \\\midrule
+      $\psi$ & maps a gene to the sum of $\phi(g,h)$ over all $h \in \sigma(g)$ & $\psi(g) \in {\mathbb R}_{\geq 0}$ \\\midrule
+      $\nu$ & maps a set of nodes to the subset of nodes that are genes &
+      $\nu(\{\textrm{ENSG00000130158}, \textrm{HP:0002814}\}) = \{\textrm{ENSG00000130158}\}$ \\\midrule
+      $\alpha$ & maps a gene to the set of gene nodes reachable from $g$ &
+      \\\midrule
+      ${\boldsymbol t}^{(g)}$ & the node weights for nodes reachable from $g$ &
+      ${\boldsymbol t}^{(g)} \in {({\mathbb R}_{\geq 0})}^{|\alpha(g)|}$ \\\midrule
+      ${\boldsymbol k}$ & the weights for node category types & ${\boldsymbol k} \in {({\mathbb R}_{\geq 0})}^{|C_T|}$ \\\midrule
+      ${\boldsymbol w}$ & the weights for edge predicate types & ${\boldsymbol w} \in {({\mathbb R}_{\geq 0})}^{|R|}$ \\\midrule
+      $f$ & the universal prediction score offset & $f \in {\mathbb R}_{-}$ \\\midrule
+      $\upsilon_{g,h}$ & maps a parameter tuple to a prediction score & $\upsilon({\boldsymbol t}^{(g)}, {\boldsymbol k},{\boldsymbol w}, f)$ \\\midrule
+      $m$ & the maximum number of edge hops for paths & $m=4$ \\\midrule
+      $u_1$ & hyperparameter for $L^1$ norm penalty for ${\boldsymbol t}^{(g)}$ & $u_1 \in {\mathbb R}_{\geq 0}$ \\\midrule
+      $u_2$ & hyperparameter for $L^2$ norm penalty for ${\boldsymbol t}^{(g)}$ & $u_1 \in {\mathbb R}_{\geq 0}$ \\\midrule
+    \end{tabular}
+    }
+  \end{center}
+  \caption{Table of key symbol definitions}\label{table:symboldefs}
+\end{table}
+
+\end{document} 
