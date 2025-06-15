@@ -217,38 +217,59 @@ class GeneSymptomClassifier:
         logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
         logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
         self.show_predicted_labels()
-        self.evaluate_classification(threshold=0.5)
+        first_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
         self.show_top_intermediate_nodes()
 
-        # TODO: Add second optimization step? (gene-specific one) Initial attempt below.. (not complete/working)
-        # logging.info(f"Starting second optimization (focused on gene-specific node weights)")
-        # start = time.time()
-        # # Ensure that predicate weights and baseline offset learned during the first optimization are fixed
-        # self.predicate_weights.requires_grad = False
-        # self.baseline_offset.requires_grad = False
-        # logging.info(f"Node weights tensor is: {self.node_weights_tensor}")
-        # # Learn node weights separately for each gene
-        # for gene_index, gene in enumerate(self.groundtruth.genes_list):
-        #     gene_node_weights = self.node_weights_tensor[gene_index].detach().clone()
-        #     gene_node_weights.requires_grad = True
-        #     params = [gene_node_weights]
-        #     optimizer_2 = torch.optim.Adam(params, lr=self.LEARNING_RATE)
-        #     for iteration_num in range(1000):
-        #         optimizer_2.zero_grad()
-        #         loss = self.objective_function_gene(params, gene=gene)
-        #         loss.backward()
-        #         optimizer_2.step()
-        #         if iteration_num % 100 == 0:
-        #             logging.debug(f"On iteration {iteration_num} - loss is: {loss:.4f}")
-        #     # Move the learned values back to our original main tensor
-        #     self.node_weights_tensor[gene_index] = gene_node_weights
-        # logging.info(f"Done with second optimization. Took {round((time.time() - start) / 60)} minutes.")
-        # logging.info(f"Node weights tensor is: {self.node_weights_tensor}")
-        #
-        # logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
-        # logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
-        # self.show_predicted_labels()
-        # self.evaluate_classification(threshold=0.5)
+        logging.info(
+            "Starting second optimization (focused on gene-specific node weights)"
+        )
+        start = time.time()
+
+        # Freeze predicate weights and baseline offset learned in the first step
+        self.predicate_weights.requires_grad = False
+        self.baseline_offset.requires_grad = False
+        self.node_weights_tensor.requires_grad = False
+
+        for gene_index, gene in enumerate(self.groundtruth.genes_list):
+            gene_node_weights = self.node_weights_tensor[gene_index].detach().clone()
+            gene_node_weights.requires_grad = True
+            params = [gene_node_weights]
+            optimizer_2 = torch.optim.Adam(params, lr=self.LEARNING_RATE)
+            best_loss = float("inf")
+            stable_rounds = 0
+            for iteration_num in range(1000):
+                optimizer_2.zero_grad()
+                loss = self.objective_function_gene(params, gene=gene)
+                loss.backward()
+                optimizer_2.step()
+
+                if loss < best_loss - self.MIN_DELTA:
+                    best_loss = loss
+                else:
+                    stable_rounds += 1
+
+                if iteration_num % 100 == 0:
+                    logging.debug(
+                        f"On iteration {iteration_num} for {gene} - loss is: {loss:.4f}"
+                    )
+                if stable_rounds >= self.STABLE_ROUNDS_REQUIRED:
+                    break
+
+            # Update the main tensor with learned values for this gene
+            with torch.no_grad():
+                self.node_weights_tensor[gene_index].copy_(gene_node_weights.detach())
+
+        logging.info(
+            f"Done with second optimization. Took {round((time.time() - start) / 60)} minutes."
+        )
+        logging.info(f"Node weights tensor is: {self.node_weights_tensor}")
+
+        logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
+        logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
+        self.show_predicted_labels()
+        second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
+
+        self.summarize_metrics(first_metrics, second_metrics)
 
     def objective_function(self, params):
         # Thank you to David for the core of this function
@@ -282,10 +303,17 @@ class GeneSymptomClassifier:
         # TODO: in initial implementation, node weights were initialized to random here... should we do that?
         gene_node_weights = params[0]
         sum_loss = 0
-        for symptom in self.groundtruth.gene_to_symptoms.get(gene, set()):  # Only considering positive examples
-            predicted_probability = self.compute_predicted_probability(gene, symptom)
+        true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
+        negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
+        for symptom in true_symptom_set.union(negative_symptom_set):
+            predicted_probability = self.compute_predicted_probability(
+                gene, symptom, gene_node_weights_override=gene_node_weights
+            )
+            true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
             symptom_frequency = self.get_frequency(gene, symptom)
-            cross_entropy_loss = - torch.log(predicted_probability + 1e-15)  # Since true label = 1
+            first_term = true_label * torch.log(predicted_probability + 1e-15)
+            second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
+            cross_entropy_loss = -(first_term + second_term)
             sum_loss += symptom_frequency * cross_entropy_loss
         # Apply node weight regularization penalties
         l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
@@ -293,12 +321,17 @@ class GeneSymptomClassifier:
         total_loss = (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
         return total_loss
 
-    def compute_predicted_probability(self, gene: str, symptom: str):
+    def compute_predicted_probability(
+        self, gene: str, symptom: str, gene_node_weights_override: torch.Tensor | None = None
+    ):
         # Thank you David for the core of this function
         gene_index = self.groundtruth.gene_indices_map[gene]
         if symptom in self.graph.node_indices_map:
             symptom_index = self.graph.node_indices_map[symptom]
-            diag_node_weights = torch.diag(self.node_weights_tensor[gene_index])
+            if gene_node_weights_override is None:
+                diag_node_weights = torch.diag(self.node_weights_tensor[gene_index])
+            else:
+                diag_node_weights = torch.diag(gene_node_weights_override)
             weighted_adjacency = sum(self.predicate_weights[predicate_index] * self.graph.adjacency_tensor[predicate_index]
                                      for predicate_index in range(self.graph.num_predicates))
             M = diag_node_weights @ weighted_adjacency
@@ -349,7 +382,7 @@ class GeneSymptomClassifier:
                 logging.info(f"For gene '{self.graph.get_node_name(gene)}' and symptom "
                              f"'{self.graph.get_node_name(symptom)}', top intermediate nodes are:\n   {node_weight_str}")
 
-    def evaluate_classification(self, threshold):
+    def evaluate_classification(self, threshold, log_output=True):
         true_labels = []
         predicted_probs = []
         for gene in self.groundtruth.genes:
@@ -382,12 +415,32 @@ class GeneSymptomClassifier:
         for true_label, predicted_label in zip(true_labels, predicted_labels):
             confusion_matrix[int(true_label), int(predicted_label)] += 1
 
-        logging.info(f"Accuracy: {accuracy:.4f}")
-        logging.info(f"Precision: {precision:.4f}")
-        logging.info(f"Recall: {recall:.4f}")
-        logging.info(f"F1 Score: {f1:.4f}")
-        logging.info(f"AUROC: {auroc:.4f}")
-        logging.info(f"Confusion matrix:\n {confusion_matrix}")
+        metrics = {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "auroc": auroc,
+            "confusion_matrix": confusion_matrix,
+        }
+        if log_output:
+            self.log_metrics(metrics)
+        return metrics
+
+    def log_metrics(self, metrics):
+        logging.info(f"Accuracy: {metrics['accuracy']:.4f}")
+        logging.info(f"Precision: {metrics['precision']:.4f}")
+        logging.info(f"Recall: {metrics['recall']:.4f}")
+        logging.info(f"F1 Score: {metrics['f1']:.4f}")
+        logging.info(f"AUROC: {metrics['auroc']:.4f}")
+        logging.info(f"Confusion matrix:\n {metrics['confusion_matrix']}")
+
+    def summarize_metrics(self, joint_metrics, per_gene_metrics):
+        """Print metrics from both optimization stages."""
+        logging.info("Metrics after first optimization (joint):")
+        self.log_metrics(joint_metrics)
+        logging.info("Metrics after second optimization (per-gene):")
+        self.log_metrics(per_gene_metrics)
 
     def sum_max_frequencies(self, gene: str):
         # Sum the max frequencies for all symptoms associated with this gene
