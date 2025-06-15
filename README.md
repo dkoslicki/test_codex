@@ -11,7 +11,7 @@ To get set up to run code:
 1. Create and activate a python environment running Python 3.10
 2. Run `pip install -r raretarget/requirements.txt`
 
-
+`master` branch is just to get OpenAI's Codex to work.
 ### Repo overview
 
 * [graphs](/graphs): Contains different toy/test graphs
