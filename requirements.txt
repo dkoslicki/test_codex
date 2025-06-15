@@ -1,0 +1,12 @@
+numpy
+networkx
+scipy
+matplotlib
+jsonlines
+requests
+lxml
+wget
+torch
+torchvision
+torchaudio
+torchmetrics
