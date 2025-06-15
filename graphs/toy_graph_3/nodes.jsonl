@@ -1,0 +1,171 @@
+{"id": "NCBIGene:2187", "name": "FANCB", "category": "biolink:Gene"}
+{"id": "NCBIGene:2175", "name": "FANCA", "category": "biolink:Gene"}
+{"id": "NCBIGene:4851", "name": "NOTCH1", "category": "biolink:Gene"}
+{"id": "NCBIGene:54567", "name": "DLL4", "category": "biolink:Gene"}
+{"id": "UMLS:C1257825", "name": "Genomic Stability", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C18133", "name": "Missense Mutation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0032529", "name": "Genetic Polymorphism", "category": "biolink:PhysiologicalProcess"}
+{"id": "MESH:D009154", "name": "Mutation", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0010467", "name": "gene expression", "category": "biolink:BiologicalProcess"}
+{"id": "UMLS:C0015219", "name": "Biological Evolution", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1510835", "name": "Aging-Related Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1148523", "name": "Childbirth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0678723", "name": "biological development", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0333953", "name": "Involution", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0020964", "name": "Immune response", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0232338", "name": "Blood flow", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0043240", "name": "Wound Healing", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0035150", "name": "Reproduction", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0032961", "name": "Pregnancy", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0025519", "name": "Metabolism", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0025329", "name": "Menstrual cycle", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0022864", "name": "Labor (Childbirth)", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0018270", "name": "Growth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0015895", "name": "Fertility", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0014653", "name": "Equilibrium", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0013470", "name": "Eating", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0012238", "name": "Digestion", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0011065", "name": "Cessation of life", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0005615", "name": "Birth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0001811", "name": "Aging", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1513094", "name": "Melanogenesis", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C1156140", "name": "ribosome biogenesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0162638", "name": "Apoptosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "MESH:D014158", "name": "Transcription, Genetic", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0015283", "name": "Exocytosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1327413", "name": "cytokine production", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1155328", "name": "Antiviral Response", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0743925", "name": "Fetal Growth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0597987", "name": "Energy Balance", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0302600", "name": "Angiogenic Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0018951", "name": "Hematopoiesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0015264", "name": "Exertion", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0014272", "name": "Energy Metabolism", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007595", "name": "Cell Growth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007586", "name": "Cell Cycle", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0234222", "name": "Baresthesia", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0232741", "name": "Liver function", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0231256", "name": "Body growth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0149784", "name": "biological adaptation to stress", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0080310", "name": "Left Ventricular Function", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0037313", "name": "Sleep", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0035203", "name": "Respiration", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0031845", "name": "Physiological Processes", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0031843", "name": "physiological aspects", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0026255", "name": "Mitosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0243144", "name": "Uptake", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0221102", "name": "Excretory function", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0037083", "name": "Signal Transduction", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007587", "name": "Cell Death", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0000934", "name": "Acclimatization", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0006308", "name": "DNA catabolic process", "category": "biolink:BiologicalProcess"}
+{"id": "CHV:0000041586", "name": "gene mutation", "category": "biolink:PhysiologicalProcess"}
+{"id": "CHV:0000005408", "name": "gene expression regulation", "category": "biolink:PhysiologicalProcess"}
+{"id": "MESH:D017353", "name": "Gene Deletion", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1516349", "name": "Cell Maturation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1155046", "name": "T-Cell Proliferation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1519516", "name": "Tissue-Specific Gene Expression", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1515670", "name": "mRNA Expression", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1156200", "name": "Histone Acetylation", "category": "biolink:MolecularActivity"}
+{"id": "MESH:D018095", "name": "Germ-Line Mutation", "category": "biolink:PhysiologicalProcess"}
+{"id": "CHV:0000005434", "name": "genetic markers", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0029976", "name": "Blastocyst Implantation, natural", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0026649", "name": "Movement", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0008810", "name": "Circadian Rhythms", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0596290", "name": "Cell Proliferation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0376452", "name": "DNA Methylation", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C0029433", "name": "Osteogenesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0026559", "name": "Morphogenesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1511806", "name": "Developmental process", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C18092", "name": "Gene-Environment Interaction", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007608", "name": "cell motility", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0678939", "name": "spontaneous mutation", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C21051", "name": "Epigenetic Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1514248", "name": "Post-Transcriptional Regulation", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C20102", "name": "Hypermethylation", "category": "biolink:PhysiologicalProcess"}
+{"id": "CHV:0000055769", "name": "protein expression", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0006338", "name": "chromatin remodeling", "category": "biolink:BiologicalProcess"}
+{"id": "GO:0030533", "name": "triplet codon-amino acid adaptor activity", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C1153198", "name": "antiporter activity", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0597360", "name": "receptor expression", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C2936272", "name": "Circadian Clocks", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1160185", "name": "Viral Transduction", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1135598", "name": "postnatal development", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0950151", "name": "Estrous Cycle", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0814002", "name": "Neurogenesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0699900", "name": "Catabolism", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0678889", "name": "Immunoregulation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0596236", "name": "calcium metabolism", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0560560", "name": "Moving", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0439826", "name": "Olfactory", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0042789", "name": "Vision", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0036887", "name": "Sexual Maturation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0025516", "name": "Metabolic Detoxication, Drug", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0015914", "name": "Fertilization", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0005486", "name": "Bioenergetics", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0000936", "name": "Visual Accommodation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0598964", "name": "neurotransmitter release", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1519624", "name": "Transmembrane Transport", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1158770", "name": "Transcriptional Regulation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1154988", "name": "defense response", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0598501", "name": "Chromosome Pairing", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1519614", "name": "Genetic Translation Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1325880", "name": "cellular process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1160340", "name": "brain development", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1160339", "name": "central nervous system development", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0971859", "name": "Bone Growth", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0678896", "name": "Endocrine function", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0599894", "name": "cellular targeting", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0443158", "name": "Brain activity", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0232896", "name": "Reproductive function", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0025251", "name": "Membrane Potentials", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007620", "name": "Cell Survival", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007613", "name": "Cell physiology", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007582", "name": "Cell Communication", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0007577", "name": "Cell Adhesion", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0005775", "name": "Blood Circulation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1524026", "name": "Metabolic Process, Cellular", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C20153", "name": "RNA Interference", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0234112", "name": "Facilitation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0004391", "name": "Autophagy", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C4236737", "name": "Ferroptosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C2611812", "name": "signaling cascade", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C2610186", "name": "nuclear mRNA cis splicing, via spliceosome", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C2610960", "name": "Pyroptosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1517553", "name": "Glial Cell Proliferation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1514758", "name": "Receptor Activation Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1512772", "name": "Anastasis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1326120", "name": "cell activation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C1155074", "name": "mast cell activation", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0008134", "name": "transcription factor binding", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C0598095", "name": "sexual dimorphism (cellular)", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0525038", "name": "Amino Acid Substitution", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C17554", "name": "Transcriptional Activation", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0036658", "name": "Sensory perception", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0018841", "name": "Thermogenesis", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0282498", "name": "Heat-Shock Response", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0025558", "name": "Biological Metamorphosis", "category": "biolink:PhysiologicalProcess"}
+{"id": "NCIT:C28614", "name": "Transcription Process", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0006264", "name": "mitochondrial DNA replication", "category": "biolink:BiologicalProcess"}
+{"id": "GO:0009299", "name": "mRNA transcription", "category": "biolink:BiologicalProcess"}
+{"id": "GO:0003723", "name": "RNA binding", "category": "biolink:MolecularActivity"}
+{"id": "GO:0003677", "name": "DNA binding", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C0678953", "name": "hereditary factors", "category": "biolink:PhysiologicalProcess"}
+{"id": "GO:0006260", "name": "DNA replication", "category": "biolink:BiologicalProcess"}
+{"id": "UMLS:C0079870", "name": "Mutagenesis, Site-Directed", "category": "biolink:PhysiologicalProcess"}
+{"id": "MESH:D011995", "name": "Recombination, Genetic", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0020202", "name": "Crossbreeding", "category": "biolink:PhysiologicalProcess"}
+{"id": "CHV:0000000950", "name": "alternative splicing", "category": "biolink:PhysiologicalProcess"}
+{"id": "UMLS:C0026820", "name": "Muscle Contraction", "category": "biolink:PhysiologicalProcess"}
+{"id": "MONDO:0002280", "name": "anemia", "category": "biolink:PhenotypicFeature"}
+{"id": "MONDO:0016064", "name": "cleft palate", "category": "biolink:PhenotypicFeature"}
+{"id": "MONDO:0005027", "name": "epilepsy", "category": "biolink:PhenotypicFeature"}
+{"id": "MONDO:0008542", "name": "tetralogy of fallot", "category": "biolink:PhenotypicFeature"}
+{"id": "HP:0001508", "name": "Failure to thrive", "category": "biolink:PhenotypicFeature"}
+{"id": "GO:0006260", "name": "DNA replication", "category": "biolink:BiologicalProcess"}
+{"id": "GO:0000724", "name": "double-strand break repair via homologous recombination", "category": "biolink:BiologicalProcess"}
+{"id": "GO:0006289", "name": "nucleotide-excision repair", "category": "biolink:BiologicalProcess"}
+{"id": "UMLS:C0017952", "name": "Glycolysis", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C0597513", "name": "Steroid biosynthesis", "category": "biolink:MolecularActivity"}
+{"id": "UMLS:C1155468", "name": "Hedgehog Signaling Pathway", "category": "biolink:MolecularActivity"}
+{"id": "GO:0007165", "name": "signal transduction", "category": "biolink:Pathway"}

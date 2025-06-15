@@ -1,0 +1,14 @@
+{
+    "MONDO:0019391": {
+        "MONDO:0008561": "very_frequent",
+        "MONDO:0002280": "very_frequent",
+        "MONDO:0001149": "frequent",
+        "MONDO:0016064": "occasional",
+        "MONDO:0008542": "occasional"
+    },
+    "MONDO:0007034": {
+        "HP:0001508": "very_frequent",
+        "MONDO:0008542": "frequent",
+        "MONDO:0005027": "occasional"
+    }
+}

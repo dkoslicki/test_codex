@@ -1,0 +1,14 @@
+{"id": 1, "subject": "NOTCH1", "object": "Glycolysis", "predicate": "biolink:affects"}
+{"id": 2, "subject": "Glycolysis", "object": "Thermogenesis", "predicate": "biolink:affects"}
+{"id": 3, "subject": "Thermogenesis", "object": "epilepsy", "predicate": "biolink:causes"}
+{"id": 4, "subject": "FANCA", "object": "nucleotide-excision repair", "predicate": "biolink:affects"}
+{"id": 5, "subject": "nucleotide-excision repair", "object": "Cell Proliferation", "predicate": "biolink:coexists_with"}
+{"id": 6, "subject": "Cell Proliferation", "object": "cleft palate", "predicate": "biolink:disrupts"}
+{"id": 7, "subject": "FANCB", "object": "DNA replication", "predicate": "biolink:affects"}
+{"id": 8, "subject": "DNA replication", "object": "Biological Evolution", "predicate": "biolink:precedes"}
+{"id": 9, "subject": "Biological Evolution", "object": "cleft palate", "predicate": "biolink:related_to"}
+{"id": 10, "subject": "FANCA", "object": "Glycolysis", "predicate": "biolink:affects"}
+{"id": 11, "subject": "Glycolysis", "object": "Growth", "predicate": "biolink:affects"}
+{"id": 12, "subject": "Growth", "object": "cleft palate", "predicate": "biolink:causes"}
+{"id": 14, "subject": "DNA replication", "object": "Growth", "predicate": "biolink:affects"}
+{"id": 15, "subject": "Growth", "object": "anemia", "predicate": "biolink:causes"}

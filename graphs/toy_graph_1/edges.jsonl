@@ -1,0 +1,9 @@
+{"id": 1, "subject": "G1", "object": "D1", "predicate":  "gene_associated_with_disease"}
+{"id": 2, "subject": "G2", "object": "D2", "predicate":  "gene_associated_with_disease"}
+{"id": 3, "subject": "G2", "object": "D3", "predicate":  "gene_associated_with_disease"}
+{"id": 4, "subject": "D1", "object": "S1", "predicate":  "disease_has_symptom"}
+{"id": 5, "subject": "D1", "object": "S2", "predicate":  "disease_has_symptom"}
+{"id": 6, "subject": "D2", "object": "S2", "predicate":  "disease_has_symptom"}
+{"id": 7, "subject": "D2", "object": "S3", "predicate":  "disease_has_symptom"}
+{"id": 8, "subject": "D3", "object": "S1", "predicate":  "disease_has_symptom"}
+{"id": 9, "subject": "D3", "object": "S3", "predicate":  "disease_has_symptom"}

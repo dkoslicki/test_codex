@@ -1,0 +1,20 @@
+{"curie": "MONDO:0019391", "id": "Fanconi anemia", "category": "biolink:Disease"}
+{"curie": "NCBIGene:2175", "id": "FANCA", "category": "biolink:Gene"}
+{"curie": "NCBIGene:2187", "id": "FANCB", "category": "biolink:Gene"}
+{"curie": "MONDO:0008561", "id": "thumb deformity", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0002280", "id": "anemia", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0001149", "id": "microcephaly", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0016064", "id": "cleft palate", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0007034", "id": "Adams-Oliver syndrome", "category": "biolink:Disease"}
+{"curie": "NCBIGene:4851", "id": "NOTCH1", "category": "biolink:Gene"}
+{"curie": "NCBIGene:54567", "id": "DLL4", "category": "biolink:Gene"}
+{"curie": "HP:0001508", "id": "failure to thrive", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0008542", "id": "tetralogy of fallot", "category": "biolink:PhenotypicFeature"}
+{"curie": "MONDO:0005027", "id": "epilepsy", "category": "biolink:PhenotypicFeature"}
+{"id": "Glycolysis", "category": "biolink:Pathway"}
+{"id": "Thermogenesis", "category": "biolink:BiologicalProcess"}
+{"id": "nucleotide-excision repair", "category": "biolink:Pathway"}
+{"id": "Cell Proliferation", "category": "biolink:BiologicalProcess"}
+{"id": "DNA replication", "category": "biolink:Pathway"}
+{"id": "Biological Evolution", "category": "biolink:BiologicalProcess"}
+{"id": "Growth", "category": "biolink:BiologicalProcess"}

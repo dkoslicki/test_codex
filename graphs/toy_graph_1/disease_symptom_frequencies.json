@@ -1,0 +1,14 @@
+{
+    "D1": {
+        "S1": "very_frequent",
+        "S2": "occasional"
+    },
+    "D2": {
+        "S2": "frequent",
+        "S3": "very_rare"
+    },
+    "D3": {
+        "S1": "obligate",
+        "S3": "frequent"
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "Fanconi anemia": {
+        "anemia": "very_frequent",
+        "cleft palate": "occasional"
+    },
+    "Adams-Oliver syndrome": {
+        "epilepsy": "occasional"
+    }
+}
