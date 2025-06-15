@@ -229,7 +229,6 @@ class GeneSymptomClassifier:
         self.predicate_weights.requires_grad = False
         self.baseline_offset.requires_grad = False
         self.node_weights_tensor.requires_grad = False
-
         for gene_index, gene in enumerate(self.groundtruth.genes_list):
             gene_node_weights = self.node_weights_tensor[gene_index].detach().clone()
             gene_node_weights.requires_grad = True
@@ -267,8 +266,8 @@ class GeneSymptomClassifier:
         logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
         logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
         self.show_predicted_labels()
-        second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
 
+        second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
         self.summarize_metrics(first_metrics, second_metrics)
 
     def objective_function(self, params):
