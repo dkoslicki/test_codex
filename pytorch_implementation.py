@@ -217,7 +217,7 @@ class GeneSymptomClassifier:
         logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
         logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
         self.show_predicted_labels()
-        self.evaluate_classification(threshold=0.5)
+        first_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
         self.show_top_intermediate_nodes()
 
         logging.info(
@@ -228,7 +228,7 @@ class GeneSymptomClassifier:
         # Freeze predicate weights and baseline offset learned in the first step
         self.predicate_weights.requires_grad = False
         self.baseline_offset.requires_grad = False
-
+        self.node_weights_tensor.requires_grad = False
         for gene_index, gene in enumerate(self.groundtruth.genes_list):
             gene_node_weights = self.node_weights_tensor[gene_index].detach().clone()
             gene_node_weights.requires_grad = True
@@ -266,7 +266,9 @@ class GeneSymptomClassifier:
         logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
         logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
         self.show_predicted_labels()
-        self.evaluate_classification(threshold=0.5)
+
+        second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
+        self.summarize_metrics(first_metrics, second_metrics)
 
     def objective_function(self, params):
         # Thank you to David for the core of this function
@@ -379,7 +381,7 @@ class GeneSymptomClassifier:
                 logging.info(f"For gene '{self.graph.get_node_name(gene)}' and symptom "
                              f"'{self.graph.get_node_name(symptom)}', top intermediate nodes are:\n   {node_weight_str}")
 
-    def evaluate_classification(self, threshold):
+    def evaluate_classification(self, threshold, log_output=True):
         true_labels = []
         predicted_probs = []
         for gene in self.groundtruth.genes:
@@ -412,12 +414,32 @@ class GeneSymptomClassifier:
         for true_label, predicted_label in zip(true_labels, predicted_labels):
             confusion_matrix[int(true_label), int(predicted_label)] += 1
 
-        logging.info(f"Accuracy: {accuracy:.4f}")
-        logging.info(f"Precision: {precision:.4f}")
-        logging.info(f"Recall: {recall:.4f}")
-        logging.info(f"F1 Score: {f1:.4f}")
-        logging.info(f"AUROC: {auroc:.4f}")
-        logging.info(f"Confusion matrix:\n {confusion_matrix}")
+        metrics = {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "auroc": auroc,
+            "confusion_matrix": confusion_matrix,
+        }
+        if log_output:
+            self.log_metrics(metrics)
+        return metrics
+
+    def log_metrics(self, metrics):
+        logging.info(f"Accuracy: {metrics['accuracy']:.4f}")
+        logging.info(f"Precision: {metrics['precision']:.4f}")
+        logging.info(f"Recall: {metrics['recall']:.4f}")
+        logging.info(f"F1 Score: {metrics['f1']:.4f}")
+        logging.info(f"AUROC: {metrics['auroc']:.4f}")
+        logging.info(f"Confusion matrix:\n {metrics['confusion_matrix']}")
+
+    def summarize_metrics(self, joint_metrics, per_gene_metrics):
+        """Print metrics from both optimization stages."""
+        logging.info("Metrics after first optimization (joint):")
+        self.log_metrics(joint_metrics)
+        logging.info("Metrics after second optimization (per-gene):")
+        self.log_metrics(per_gene_metrics)
 
     def sum_max_frequencies(self, gene: str):
         # Sum the max frequencies for all symptoms associated with this gene
