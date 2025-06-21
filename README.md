@@ -14,7 +14,7 @@ To get set up to run code:
 `master` branch is just to get OpenAI's Codex to work.
 ### Repo overview
 
-* [graphs](/graphs): Contains different toy/test graphs
+* [graphs](/graphs): Contains different toy/test graphs. Inside it, `min_graph/build_min.graph` builds realistic (i.e. from RTX-KG2) small, toy graphs, and `min_graph/build_large_graph.py` builds _completely unrealistic_ synthetic, but large graphs. I'm just wiring things somewhat randomly, so behavior on these graphs might not realistically reflect performance on similarly sizes (but wired completely differently with different category/type counts).
 * [orphanet](/orphanet): Contains the necessary gene/disease/symptom mappings from Orphanet, as well as scripts for generating those mappings
 * [toy_implementation_jsonlines.py](/toy_implementation_jsonlines.py): David's human-readable initial toy implementation, adjusted to take in any specified JSON Lines formatted graph
   * Uses `SciPy.minimize` with limited-memory BFGS
