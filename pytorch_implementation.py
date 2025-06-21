@@ -182,6 +182,48 @@ class GeneSymptomClassifier:
         self.MIN_DELTA = 1e-4
         self.STABLE_ROUNDS_REQUIRED = 20
 
+        # Pre-compute some handy index tensors for batched operations
+        self.symptom_indices_map = {
+            symptom: idx for idx, symptom in enumerate(self.groundtruth.symptoms_list)
+        }
+        self.gene_node_indices = torch.tensor(
+            [self.graph.node_indices_map[g] for g in self.groundtruth.genes_list],
+            device=device,
+        )
+        self.symptom_node_indices = torch.tensor(
+            [self.graph.node_indices_map.get(s, 0) for s in self.groundtruth.symptoms_list],
+            device=device,
+        )
+        self.symptom_valid_mask = torch.tensor(
+            [s in self.graph.node_indices_map for s in self.groundtruth.symptoms_list],
+            dtype=torch.bool,
+            device=device,
+        )
+
+        # Prepare label and frequency matrices used during training
+        num_genes = len(self.groundtruth.genes_list)
+        num_symptoms = len(self.groundtruth.symptoms_list)
+        self.label_matrix = torch.zeros(num_genes, num_symptoms, device=device)
+        self.frequency_matrix = torch.zeros(num_genes, num_symptoms, device=device)
+        for g_idx, gene in enumerate(self.groundtruth.genes_list):
+            true_set = self.groundtruth.gene_to_symptoms.get(gene, set())
+            neg_set = self.shuffled_gene_to_symptoms.get(gene, set())
+            for symptom in true_set.union(neg_set):
+                s_idx = self.symptom_indices_map[symptom]
+                self.label_matrix[g_idx, s_idx] = (
+                    1 if symptom in true_set else 0
+                )
+                freq = self.groundtruth.gene_to_max_symptom_frequencies.get(gene, {}).get(
+                    symptom,
+                    AVERAGE_FREQUENCY_MIDPOINT.item(),
+                )
+                self.frequency_matrix[g_idx, s_idx] = freq
+
+        self.sum_max_frequencies_vec = torch.tensor(
+            [self.sum_max_frequencies(g) for g in self.groundtruth.genes_list],
+            device=device,
+        )
+
     def train_model(self):
         logging.info(f"TRAINING MODEL..")
 
@@ -198,17 +240,26 @@ class GeneSymptomClassifier:
         best_loss = float("inf")
         stable_rounds = 0
         for iteration_num in range(1000):
+            iter_start = time.time()
             optimizer.zero_grad()
+            fwd_start = time.time()
             loss = self.objective_function(params)
+            fwd_end = time.time()
             loss.backward()
+            bwd_end = time.time()
             optimizer.step()
+            step_end = time.time()
 
             if loss < best_loss - self.MIN_DELTA:
                 best_loss = loss
             else:
                 stable_rounds += 1
             if iteration_num % 100 == 0:
-                logging.debug(f"On iteration {iteration_num} - loss is: {loss:.4f}")
+                logging.info(
+                    f"Iter {iteration_num} - loss: {loss:.4f} | fwd: {fwd_end - fwd_start:.2f}s "
+                    f"bwd: {bwd_end - fwd_end:.2f}s step: {step_end - bwd_end:.2f}s "
+                    f"total: {step_end - iter_start:.2f}s"
+                )
             if stable_rounds >= self.STABLE_ROUNDS_REQUIRED:
                 logging.info(f"Reached stability after {iteration_num} iterations. Loss is {loss:.4f}")
                 break
@@ -271,30 +322,34 @@ class GeneSymptomClassifier:
         self.summarize_metrics(first_metrics, second_metrics)
 
     def objective_function(self, params):
-        # Thank you to David for the core of this function
-        # TODO: Can we get rid of loop over genes to be more GPU-friendly?..
         node_weights_tensor, predicate_weights, baseline_offset = params
-        total_loss = 0  # Total loss across all genes
-        for gene_index, gene in enumerate(self.groundtruth.genes_list):
-            gene_node_weights = node_weights_tensor[gene_index]
-            sum_loss = 0
-            true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-            negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-            for symptom in true_symptom_set.union(negative_symptom_set):
-                predicted_probability = self.compute_predicted_probability(gene, symptom)
-                true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-                symptom_frequency = self.get_frequency(gene, symptom)
-                first_term = true_label * torch.log(predicted_probability + 1e-15)
-                second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
-                cross_entropy_loss = - (first_term + second_term)
-                sum_loss += symptom_frequency * cross_entropy_loss
-            # Apply node weight regularization penalties
-            l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
-            l2_penalty = (self.L2_REGULARIZATION * torch.sqrt(torch.sum(gene_node_weights ** 2))) / self.graph.num_nodes
-            total_loss += (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
-        # Apply predicate weight regularization penalty TODO: why no sqrt, like above l2 penalty?
-        l2_penalty_predicates = (self.PREDICATE_L2_REGULARIZATION * torch.sum(predicate_weights ** 2)) / self.graph.num_predicates
-        average_loss = (total_loss / len(self.groundtruth.genes_list)) + l2_penalty_predicates
+
+        predicted_probs = self.compute_predicted_probability_matrix(
+            node_weights_tensor=node_weights_tensor,
+            predicate_weights=predicate_weights,
+            baseline_offset=baseline_offset,
+        )
+
+        first_term = self.label_matrix * torch.log(predicted_probs + 1e-15)
+        second_term = (1 - self.label_matrix) * torch.log(1 - predicted_probs + 1e-15)
+        cross_entropy = -(first_term + second_term)
+        weighted = self.frequency_matrix * cross_entropy
+        sum_loss_per_gene = weighted.sum(dim=1) / self.sum_max_frequencies_vec
+
+        l1_penalty = (
+            self.L1_REGULARIZATION * torch.sum(torch.abs(node_weights_tensor), dim=1)
+        ) / self.graph.num_nodes
+        l2_penalty = (
+            self.L2_REGULARIZATION * torch.sqrt(torch.sum(node_weights_tensor ** 2, dim=1))
+        ) / self.graph.num_nodes
+
+        total_loss = sum_loss_per_gene + l1_penalty + l2_penalty
+
+        l2_penalty_predicates = (
+            self.PREDICATE_L2_REGULARIZATION * torch.sum(predicate_weights ** 2)
+        ) / self.graph.num_predicates
+
+        average_loss = total_loss.mean() + l2_penalty_predicates
         return average_loss
 
     def objective_function_gene(self, params, gene: str):
@@ -320,27 +375,60 @@ class GeneSymptomClassifier:
         total_loss = (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
         return total_loss
 
+    def compute_predicted_probability_matrix(
+        self,
+        node_weights_tensor: torch.Tensor | None = None,
+        predicate_weights: torch.Tensor | None = None,
+        baseline_offset: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return predicted probabilities for all genes and symptoms."""
+        start = time.time()
+        if node_weights_tensor is None:
+            node_weights_tensor = self.node_weights_tensor
+        if predicate_weights is None:
+            predicate_weights = self.predicate_weights
+        if baseline_offset is None:
+            baseline_offset = self.baseline_offset
+
+        num_genes = node_weights_tensor.shape[0]
+        diag_node_weights = torch.diag_embed(node_weights_tensor)
+        weighted_adjacency = torch.sum(
+            predicate_weights.view(-1, 1, 1) * self.graph.adjacency_tensor, dim=0
+        )
+        M = torch.bmm(diag_node_weights, weighted_adjacency.unsqueeze(0).expand(num_genes, -1, -1))
+
+        M_power = torch.bmm(M, M)
+        matrix_power_sum = M_power.clone()
+        for _ in range(3, self.MAX_PATH_LENGTH + 1):
+            M_power = torch.bmm(M_power, M)
+            matrix_power_sum += M_power
+
+        gene_rows = matrix_power_sum[torch.arange(num_genes), self.gene_node_indices]
+        selected = gene_rows[:, self.symptom_node_indices]
+        predicted = torch.sigmoid(selected + baseline_offset)
+        predicted[:, ~self.symptom_valid_mask] = 0.0
+        logging.debug(
+            f"Batched probability computation took {time.time() - start:.4f}s"
+        )
+        return predicted
+
     def compute_predicted_probability(
         self, gene: str, symptom: str, gene_node_weights_override: torch.Tensor | None = None
-    ):
-        # Thank you David for the core of this function
-        gene_index = self.groundtruth.gene_indices_map[gene]
-        if symptom in self.graph.node_indices_map:
-            symptom_index = self.graph.node_indices_map[symptom]
-            if gene_node_weights_override is None:
-                diag_node_weights = torch.diag(self.node_weights_tensor[gene_index])
-            else:
-                diag_node_weights = torch.diag(gene_node_weights_override)
-            weighted_adjacency = sum(self.predicate_weights[predicate_index] * self.graph.adjacency_tensor[predicate_index]
-                                     for predicate_index in range(self.graph.num_predicates))
-            M = diag_node_weights @ weighted_adjacency
-            matrix_power_sum = torch.zeros_like(M)
-            for path_length in range(2, self.MAX_PATH_LENGTH + 1):
-                matrix_power_sum += torch.linalg.matrix_power(M, path_length)
-            raw_score = matrix_power_sum[gene_index, symptom_index] + self.baseline_offset
-            return torch.sigmoid(raw_score)  # Logistic sigmoid
+    ) -> torch.Tensor:
+        if symptom not in self.symptom_indices_map:
+            return torch.tensor(0.0, device=self.node_weights_tensor.device)
+
+        if gene_node_weights_override is None:
+            node_weights = self.node_weights_tensor
         else:
-            return torch.tensor(0.0)
+            node_weights = self.node_weights_tensor.clone()
+            gene_idx = self.groundtruth.gene_indices_map[gene]
+            node_weights[gene_idx] = gene_node_weights_override
+
+        probs = self.compute_predicted_probability_matrix(node_weights_tensor=node_weights)
+        gene_idx = self.groundtruth.gene_indices_map[gene]
+        symptom_idx = self.symptom_indices_map[symptom]
+        return probs[gene_idx, symptom_idx]
 
     def get_frequency(self, gene, symptom):
         if gene in self.groundtruth.gene_to_max_symptom_frequencies:
