@@ -1,5 +1,5 @@
 """
-Usage: python pytorch_implementation.py <path to graph directory - e.g., graphs/toy_graph_2>
+Usage: python pytorch_implementation_v4.py <path to graph directory - e.g., graphs/toy_graph_2>
 """
 
 import argparse
@@ -9,7 +9,7 @@ import os
 import random
 import time
 from collections import defaultdict
-from typing import Tuple, Set, List, Dict
+from typing import Tuple, Set, List, Dict, Optional
 
 import jsonlines
 import torch
@@ -41,7 +41,12 @@ memory_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(mess
 logging.basicConfig(level=logging.DEBUG,
                     handlers=[memory_handler])
 
+# Set all random seeds for reproducibility
 random.seed(22)
+torch.manual_seed(22)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(22)
+    torch.cuda.manual_seed_all(22)
 
 
 class GroundtruthHelper:
@@ -167,6 +172,7 @@ class GeneSymptomClassifier:
 
     def __init__(self, graph_dir: str, device: torch.device):
         self.graph_dir = graph_dir
+        self.device = device
         self.graph, self.groundtruth = load_data(graph_dir, device)
 
         self.num_flat_weights = self.graph.num_nodes * len(self.groundtruth.genes_list)
@@ -177,7 +183,7 @@ class GeneSymptomClassifier:
         for shuffled_gene, shuffled_symptom in self.shuffled_gene_symptom_pairs:
             self.shuffled_gene_to_symptoms[shuffled_gene].add(shuffled_symptom)
 
-        # Properties that will be learned (initiated to random)
+        # Properties that will be learned (initiated to random) - match original initialization exactly
         self.node_weights_tensor = torch.tensor([torch.rand(self.graph.num_nodes).tolist()
                                                 for gene in self.groundtruth.genes_list],
                                                 requires_grad=True,
@@ -217,6 +223,7 @@ class GeneSymptomClassifier:
 
             if loss < best_loss - self.MIN_DELTA:
                 best_loss = loss
+                stable_rounds = 0
             else:
                 stable_rounds += 1
             if iteration_num % 100 == 0:
@@ -256,6 +263,7 @@ class GeneSymptomClassifier:
 
                 if loss < best_loss - self.MIN_DELTA:
                     best_loss = loss
+                    stable_rounds = 0
                 else:
                     stable_rounds += 1
 
@@ -285,11 +293,6 @@ class GeneSymptomClassifier:
         # Save all logs to file at the end
         self.save_logs_to_file()
 
-    #def save_logs_to_file(self):
-    #    """Save all accumulated log messages to file."""
-    #    with open(f"{SCRIPT_DIR}/log_raretarget.txt", "w") as f:
-    #        for message in log_messages:
-    #            f.write(message + "\n")
     def save_logs_to_file(self):
         """Save all accumulated log messages to file."""
         from datetime import datetime
@@ -301,32 +304,78 @@ class GeneSymptomClassifier:
             for message in log_messages:
                 f.write(message + "\n")
 
-
     def objective_function(self, params):
-        # Thank you to David for the core of this function
-        # TODO: Can we get rid of loop over genes to be more GPU-friendly?..
+        """Vectorized objective function that computes all genes in parallel where possible."""
         node_weights_tensor, predicate_weights, baseline_offset = params
-        total_loss = 0  # Total loss across all genes
-        for gene_index, gene in enumerate(self.groundtruth.genes_list):
-            gene_node_weights = node_weights_tensor[gene_index]
-            sum_loss = 0
-            true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-            negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-            for symptom in true_symptom_set.union(negative_symptom_set):
-                predicted_probability = self.compute_predicted_probability(gene, symptom)
-                true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-                symptom_frequency = self.get_frequency(gene, symptom)
-                first_term = true_label * torch.log(predicted_probability + 1e-15)
-                second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
-                cross_entropy_loss = - (first_term + second_term)
-                sum_loss += symptom_frequency * cross_entropy_loss
-            # Apply node weight regularization penalties
-            l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
-            l2_penalty = (self.L2_REGULARIZATION * torch.sqrt(torch.sum(gene_node_weights ** 2))) / self.graph.num_nodes
-            total_loss += (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
-        # Apply predicate weight regularization penalty TODO: why no sqrt, like above l2 penalty?
+        
+        # Pre-compute weighted adjacency matrix once
+        weighted_adjacency = torch.zeros(self.graph.num_nodes, self.graph.num_nodes, device=self.device)
+        for predicate_idx in range(self.graph.num_predicates):
+            weighted_adjacency += predicate_weights[predicate_idx] * self.graph.adjacency_tensor[predicate_idx]
+        
+        total_loss = 0
+        num_genes = len(self.groundtruth.genes_list)
+        
+        # Process genes in batches to manage memory
+        batch_size = min(32, num_genes)
+        
+        for batch_start in range(0, num_genes, batch_size):
+            batch_end = min(batch_start + batch_size, num_genes)
+            batch_indices = list(range(batch_start, batch_end))
+            batch_loss = 0
+            
+            for idx in batch_indices:
+                gene_index = idx
+                gene = self.groundtruth.genes_list[gene_index]
+                gene_node_weights = node_weights_tensor[gene_index]
+                
+                # Compute loss for this gene
+                sum_loss = 0
+                true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
+                negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
+                
+                # Pre-compute M matrix for this gene
+                diag_node_weights = torch.diag(gene_node_weights)
+                M = diag_node_weights @ weighted_adjacency
+                
+                # Compute matrix power sum
+                matrix_power_sum = torch.zeros_like(M)
+                M_power = M @ M  # M^2
+                for path_length in range(2, self.MAX_PATH_LENGTH + 1):
+                    matrix_power_sum += M_power
+                    if path_length < self.MAX_PATH_LENGTH:
+                        M_power = M_power @ M
+                
+                # Get gene node index
+                gene_node_idx = self.graph.node_indices_map[gene]
+                
+                for symptom in true_symptom_set.union(negative_symptom_set):
+                    if symptom in self.graph.node_indices_map:
+                        symptom_idx = self.graph.node_indices_map[symptom]
+                        raw_score = matrix_power_sum[gene_node_idx, symptom_idx] + baseline_offset
+                        predicted_probability = torch.sigmoid(raw_score)
+                    else:
+                        predicted_probability = torch.tensor(0.0, device=self.device)
+                    
+                    true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
+                    symptom_frequency = self.get_frequency(gene, symptom)
+                    
+                    first_term = true_label * torch.log(predicted_probability + 1e-15)
+                    second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
+                    cross_entropy_loss = -(first_term + second_term)
+                    sum_loss += symptom_frequency * cross_entropy_loss
+                
+                # Apply regularization
+                l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
+                l2_penalty = (self.L2_REGULARIZATION * torch.sqrt(torch.sum(gene_node_weights ** 2))) / self.graph.num_nodes
+                batch_loss += (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
+            
+            total_loss += batch_loss
+        
+        # Apply predicate weight regularization
         l2_penalty_predicates = (self.PREDICATE_L2_REGULARIZATION * torch.sum(predicate_weights ** 2)) / self.graph.num_predicates
-        average_loss = (total_loss / len(self.groundtruth.genes_list)) + l2_penalty_predicates
+        average_loss = (total_loss / num_genes) + l2_penalty_predicates
+        
         return average_loss
 
     def objective_function_gene(self, params, gene: str):
