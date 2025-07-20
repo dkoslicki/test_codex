@@ -27,10 +27,19 @@ SYMPTOM_FREQUENCY_MIDPOINTS = {
 }
 AVERAGE_FREQUENCY_MIDPOINT = torch.tensor(list(SYMPTOM_FREQUENCY_MIDPOINTS.values())).mean()
 
+# Configure logging to only write to memory initially
+log_messages = []
+
+class MemoryHandler(logging.Handler):
+    def emit(self, record):
+        log_messages.append(self.format(record))
+
+# Set up memory logging
+memory_handler = MemoryHandler()
+memory_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+
 logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s: %(message)s',
-                    handlers=[logging.StreamHandler(),
-                              logging.FileHandler(f"{SCRIPT_DIR}/log_raretarget.txt")])
+                    handlers=[memory_handler])
 
 random.seed(22)
 
@@ -140,12 +149,14 @@ class GraphHelper:
             neighbors = [self.adjacency_list[node] for node in encountered_nodes]
             encountered_nodes |= set().union(*neighbors)
             if target_node in encountered_nodes:
-                print(f"\nNode {self.get_node_name(start_node)} IS connected to "
-                      f"{self.get_node_name(target_node)} within {num_hops} hops!")
+                # print(f"\nNode {self.get_node_name(start_node)} IS connected to "
+                #       f"{self.get_node_name(target_node)} within {num_hops} hops!")
+                pass
             counter += 1
         if target_node not in encountered_nodes:
-            print(f"\nNO CONNECTION between {self.get_node_name(start_node)} and {self.get_node_name(target_node)} "
-                  f"within {num_hops} hops")
+            # print(f"\nNO CONNECTION between {self.get_node_name(start_node)} and {self.get_node_name(target_node)} "
+            #       f"within {num_hops} hops")
+            pass
         return target_node in encountered_nodes
 
     def get_node_name(self, node_id) -> str:
@@ -155,6 +166,7 @@ class GraphHelper:
 class GeneSymptomClassifier:
 
     def __init__(self, graph_dir: str, device: torch.device):
+        self.graph_dir = graph_dir
         self.graph, self.groundtruth = load_data(graph_dir, device)
 
         self.num_flat_weights = self.graph.num_nodes * len(self.groundtruth.genes_list)
@@ -269,6 +281,26 @@ class GeneSymptomClassifier:
 
         second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
         self.summarize_metrics(first_metrics, second_metrics)
+
+        # Save all logs to file at the end
+        self.save_logs_to_file()
+
+    #def save_logs_to_file(self):
+    #    """Save all accumulated log messages to file."""
+    #    with open(f"{SCRIPT_DIR}/log_raretarget.txt", "w") as f:
+    #        for message in log_messages:
+    #            f.write(message + "\n")
+    def save_logs_to_file(self):
+        """Save all accumulated log messages to file."""
+        from datetime import datetime
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        graph_name = os.path.basename(self.graph_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"log_raretarget_{script_name}_{graph_name}_{timestamp}.txt"
+        with open(f"{SCRIPT_DIR}/{log_filename}", "w") as f:
+            for message in log_messages:
+                f.write(message + "\n")
+
 
     def objective_function(self, params):
         # Thank you to David for the core of this function
@@ -436,6 +468,16 @@ class GeneSymptomClassifier:
 
     def summarize_metrics(self, joint_metrics, per_gene_metrics):
         """Print metrics from both optimization stages."""
+        # Only print final metrics to screen
+        print("Metrics after second optimization (per-gene):")
+        print(f"Accuracy: {per_gene_metrics['accuracy']:.4f}")
+        print(f"Precision: {per_gene_metrics['precision']:.4f}")
+        print(f"Recall: {per_gene_metrics['recall']:.4f}")
+        print(f"F1 Score: {per_gene_metrics['f1']:.4f}")
+        print(f"AUROC: {per_gene_metrics['auroc']:.4f}")
+        print(f"Confusion matrix:\n {per_gene_metrics['confusion_matrix']}")
+        
+        # Log all metrics to memory for file output
         logging.info("Metrics after first optimization (joint):")
         self.log_metrics(joint_metrics)
         logging.info("Metrics after second optimization (per-gene):")
