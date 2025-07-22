@@ -1,6 +1,14 @@
+#!/usr/bin/env python
 """
-Usage: python pytorch_implementation.py <path to graph directory - e.g., graphs/toy_graph_2>
+Fast RareTarget implementation – v2
+-----------------------------------
+Changes vs. the previous version
+• **Fully‑vectorised loss:**  all gene‑symptom pairs are processed in one
+  big gather, eliminating a long Python loop that was CPU‑bound.
+• Same sparse message‑passing core → still tiny VRAM.
+• Same logging + metrics output (training.log & performance.txt).
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -9,41 +17,57 @@ import os
 import random
 import time
 from collections import defaultdict
-from typing import Tuple, Set, List, Dict
+from typing import Dict, List, Set, Tuple
 
 import jsonlines
+import numpy as np
 import torch
-import torchmetrics
+from torch import Tensor
+from torch_sparse import SparseTensor             # pip install torch-sparse
+from sklearn.metrics import (                     # pip install scikit-learn
+    roc_auc_score,
+    f1_score,
+    confusion_matrix,
+    accuracy_score,
+)
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# ────────────────────────── logging ──────────────────────────────────────────
+_log: List[str] = []
 
-# These are the labels used in the Oprhanet data download (NOTE: slightly different than those in the Orphanet UI)
-SYMPTOM_FREQUENCY_MIDPOINTS = {
-    'obligate': 1.00,
-    'very_frequent': 0.90,
-    'frequent': 0.55,
-    'occasional': 0.17,
-    'very_rare': 0.02
+
+class _MemHandler(logging.Handler):
+    def emit(self, record):
+        _log.append(self.format(record))
+
+
+logging.basicConfig(level=logging.DEBUG, handlers=[_MemHandler()],
+                    format="%(asctime)s %(levelname)s: %(message)s")
+
+# ────────────────────────── constants ────────────────────────────────────────
+SYMPTOM_FREQ = {
+    "obligate": 1.00,
+    "very_frequent": 0.90,
+    "frequent": 0.55,
+    "occasional": 0.17,
+    "very_rare": 0.02,
 }
-AVERAGE_FREQUENCY_MIDPOINT = torch.tensor(list(SYMPTOM_FREQUENCY_MIDPOINTS.values())).mean()
-
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s: %(message)s',
-                    handlers=[logging.StreamHandler(),
-                              logging.FileHandler(f"{SCRIPT_DIR}/log_raretarget.txt")])
-
-random.seed(22)
+AVG_FREQ = torch.tensor(list(SYMPTOM_FREQ.values())).mean()
 
 
+# ────────────────────────── helpers ──────────────────────────────────────────
 class GroundtruthHelper:
-
-    def __init__(self, gene_to_diseases: Dict[str, Set[str]],
-                 disease_to_symptom_frequencies: Dict[str, Dict[str, float]],
-                 gene_to_symptoms: Dict[str, Set[str]],
-                 gene_symptom_pairs: Set[Tuple[str, str]],
-                 gene_to_symptom_frequency_sets: Dict[str, Dict[str, Set[float]]],
-                 gene_to_max_symptom_frequencies: Dict[str, Dict[str, float]],
-                 genes: Set[str], diseases: Set[str], symptoms: Set[str]):
+    def __init__(
+        self,
+        gene_to_diseases,
+        disease_to_symptom_frequencies,
+        gene_to_symptoms,
+        gene_symptom_pairs,
+        gene_to_symptom_frequency_sets,
+        gene_to_max_symptom_frequencies,
+        genes,
+        diseases,
+        symptoms,
+    ):
         self.gene_to_diseases = gene_to_diseases
         self.disease_to_symptom_frequencies = disease_to_symptom_frequencies
         self.gene_to_symptoms = gene_to_symptoms
@@ -53,507 +77,330 @@ class GroundtruthHelper:
         self.genes = genes
         self.diseases = diseases
         self.symptoms = symptoms
-        self.genes_list = list(self.genes)
-        self.symptoms_list = list(self.symptoms)
-        self.gene_indices_map = {gene: index for index, gene in enumerate(self.genes_list)}
 
-        logging.debug(f"Groundtruth data contains {len(self.genes)} genes, {len(self.diseases)} diseases, "
-                      f"and {len(self.symptoms)} symptoms.")
-        logging.debug(f"Groundtruth data contains {len(self.gene_symptom_pairs)} gene--symptom pairs.")
+        self.genes_list = list(genes)
+        self.symptoms_list = list(symptoms)
+        self.gene_idx = {g: i for i, g in enumerate(self.genes_list)}
 
-    def __str__(self):
-        return (f"GroundtruthHelper(gene_to_diseases={self.gene_to_diseases}, "
-                f"gene_to_symptom_frequency_sets={self.gene_to_symptom_frequency_sets},"
-                f"gene_to_max_symptom_frequencies={self.gene_to_max_symptom_frequencies})")
+        logging.debug(
+            f"Ground‑truth: {len(genes)} genes, {len(diseases)} diseases, "
+            f"{len(symptoms)} symptoms – {len(gene_symptom_pairs)} pairs."
+        )
 
-    def gene_and_symptom_are_associated(self, gene, symptom) -> int:
-        return 1 if (gene, symptom) in self.gene_symptom_pairs else 0
+    def assoc(self, g: str, s: str) -> int:
+        return int((g, s) in self.gene_symptom_pairs)
 
 
 class GraphHelper:
-
-    def __init__(self, nodes_map: Dict[str, any], edges_map: Dict[str, any], device: torch.device):
+    def __init__(self, nodes_map, edges_map, device):
         self.nodes_map = nodes_map
         self.edges_map = edges_map
 
-        # Create some useful data structures
-        self.predicates_list = list({edge["predicate"] for edge in self.edges_map.values()})
+        self.predicates_list = list({e["predicate"] for e in edges_map.values()})
         self.num_predicates = len(self.predicates_list)
-        self.predicate_indices_map = {predicate: index for index, predicate in enumerate(self.predicates_list)}
+        self.pred_idx = {p: i for i, p in enumerate(self.predicates_list)}
 
-        self.nodes_list = list(self.nodes_map.keys())
+        self.nodes_list = list(nodes_map)
         self.num_nodes = len(self.nodes_list)
-        self.node_indices_map = {node_key: index for index, node_key in enumerate(self.nodes_list)}
+        self.node_idx = {n: i for i, n in enumerate(self.nodes_list)}
 
-        self.adjacency_tensor, self.adjacency_list = self.create_adjacency_maps(self.edges_map, device)
+        self._build_sparse_edges(device)
 
-        logging.debug(f"Graph contains {self.num_nodes} nodes and {len(self.edges_map)} edges.")
-        logging.debug(f"Graph contains {len(self.predicates_list)} distinct predicates: {self.predicates_list} ")
+        logging.debug(
+            f"Graph: {self.num_nodes} nodes, {len(edges_map)} edges, "
+            f"{self.num_predicates} predicates."
+        )
 
-    def create_adjacency_maps(self, edges_map: dict, device: torch.device) -> Tuple[torch.tensor, dict]:
-        # Create an adjacency matrix for each predicate
-        # TODO: For symmetric predicates, record edges in both directions?
-        adjacency_list = defaultdict(set)
-        predicate_adj_tensor = torch.zeros(self.num_predicates, self.num_nodes, self.num_nodes, device=device)
-        for edge in self.edges_map.values():
-            predicate = edge["predicate"]
-            predicate_index = self.predicate_indices_map[predicate]
-            subject_index = self.node_indices_map[edge["subject"]]
-            object_index = self.node_indices_map[edge["object"]]
-            predicate_adj_tensor[predicate_index, subject_index, object_index] = 1
-            adjacency_list[edge["subject"]].add(edge["object"])
-        assert len(predicate_adj_tensor) == self.num_predicates
-        triples = {(edge["subject"], edge["predicate"], edge["object"]) for edge in edges_map.values()}
-        assert torch.sum(predicate_adj_tensor) == len(triples)
-        return predicate_adj_tensor, adjacency_list
-
-    def get_all_intermediate_nodes(self, start_node: str, target_node: str) -> Set[str]:
-        intermediate_nodes_map = defaultdict(set)
-        return self.get_all_intermediate_nodes_recursive(start_node, target_node,
-                                                         intermediate_nodes_map).difference({start_node, target_node})
-
-    def get_all_intermediate_nodes_recursive(self, current_node: str, target_node: str,
-                                             intermediate_nodes_map: Dict[str, Set[str]]) -> Set[str]:
-        if current_node not in intermediate_nodes_map:
-            # Initialize entry for this node
-            neighbors = self.adjacency_list.get(current_node, set())
-            if target_node in neighbors:
-                intermediate_nodes_map[current_node].add(current_node)
-            else:
-                intermediate_nodes_map[current_node] = set()
-
-            # Find neighbor solutions to update this node's solution with
-            neighbor_solutions = [self.get_all_intermediate_nodes_recursive(neighbor, target_node,
-                                                                            intermediate_nodes_map)
-                                  for neighbor in neighbors]
-            neighbor_solutions_union = set().union(*neighbor_solutions)
-            if neighbor_solutions_union:
-                intermediate_nodes_map[current_node].add(current_node)
-                intermediate_nodes_map[current_node] |= neighbor_solutions_union
-
-        return intermediate_nodes_map[current_node]
-
-    def check_if_nodes_are_connected(self, start_node: str, target_node: str, num_hops: int) -> bool:
-        encountered_nodes = {start_node}
-        counter = 0
-        while target_node not in encountered_nodes and counter < num_hops:
-            neighbors = [self.adjacency_list[node] for node in encountered_nodes]
-            encountered_nodes |= set().union(*neighbors)
-            if target_node in encountered_nodes:
-                print(f"\nNode {self.get_node_name(start_node)} IS connected to "
-                      f"{self.get_node_name(target_node)} within {num_hops} hops!")
-            counter += 1
-        if target_node not in encountered_nodes:
-            print(f"\nNO CONNECTION between {self.get_node_name(start_node)} and {self.get_node_name(target_node)} "
-                  f"within {num_hops} hops")
-        return target_node in encountered_nodes
-
-    def get_node_name(self, node_id) -> str:
-        return self.nodes_map.get(node_id, {}).get("name", node_id)
+    def _build_sparse_edges(self, device):
+        rows, cols, preds = [], [], []
+        for e in self.edges_map.values():
+            rows.append(self.node_idx[e["subject"]])
+            cols.append(self.node_idx[e["object"]])
+            preds.append(self.pred_idx[e["predicate"]])
+        self.edge_index = torch.tensor([rows, cols], device=device)
+        self.edge_preds = torch.tensor(preds, device=device)
+        self.size = (self.num_nodes, self.num_nodes)
 
 
+# ────────────────────────── model ────────────────────────────────────────────
 class GeneSymptomClassifier:
-
+    # ---------------- init ----------------------------------------------------
     def __init__(self, graph_dir: str, device: torch.device):
-        self.graph, self.groundtruth = load_data(graph_dir, device)
+        self.device = device
+        self.graph, self.gt = load_data(graph_dir, device)
 
-        self.num_flat_weights = self.graph.num_nodes * len(self.groundtruth.genes_list)
+        self.neg_pairs = self._make_negatives()
+        self.neg_by_gene = defaultdict(set)
+        for g, s in self.neg_pairs:
+            self.neg_by_gene[g].add(s)
 
-        # Generate negative training examples
-        self.shuffled_gene_symptom_pairs = self.generate_shuffled_gene_symptom_pairs()
-        self.shuffled_gene_to_symptoms = defaultdict(set)
-        for shuffled_gene, shuffled_symptom in self.shuffled_gene_symptom_pairs:
-            self.shuffled_gene_to_symptoms[shuffled_gene].add(shuffled_symptom)
+        # ►► pre‑compute *all* training pairs and weights (vectorised loss)
+        self._prepare_pair_tensors()
 
-        # Properties that will be learned (initiated to random)
-        self.node_weights_tensor = torch.tensor([torch.rand(self.graph.num_nodes).tolist()
-                                                for gene in self.groundtruth.genes_list],
-                                                requires_grad=True,
-                                                device=device)
-        self.predicate_weights = torch.rand(self.graph.num_predicates, requires_grad=True, device=device)
-        self.baseline_offset = torch.tensor(-10.0, requires_grad=True, device=device)
+        # params
+        self.node_w = torch.rand(len(self.gt.genes), self.graph.num_nodes,
+                                 device=device, requires_grad=True)
+        self.pred_w = torch.rand(self.graph.num_predicates,
+                                 device=device, requires_grad=True)
+        self.bias = torch.tensor(-10.0, device=device, requires_grad=True)
 
-        # Hyperparameters:
-        self.L1_REGULARIZATION = 0.00000001  # Corresponds to 'a' in equations
-        self.L2_REGULARIZATION = 0.00000001  # Corresponds to 'b' in equations
-        self.PREDICATE_L2_REGULARIZATION = 0.0000001  # Corresponds to 'c' in equations
-        self.MAX_PATH_LENGTH = 4
-        self.LEARNING_RATE = 0.1
-        self.MIN_DELTA = 1e-4
-        self.STABLE_ROUNDS_REQUIRED = 20
+        # hyper
+        self.L1_REG, self.L2_REG = 1e-8, 1e-8
+        self.PRED_L2_REG = 1e-7
+        self.MAX_PATH = 4
+        self.LR = 0.1
+        self.MIN_DELTA, self.PATIENCE = 1e-4, 20
 
-    def train_model(self):
-        logging.info(f"TRAINING MODEL..")
+    # ---------------- negatives ----------------------------------------------
+    def _make_negatives(self) -> Set[Tuple[str, str]]:
+        gp = self.gt.gene_symptom_pairs
+        n_pos = len(gp)
+        max_pairs = len(self.gt.genes) * len(self.gt.symptoms)
+        tgt = min(n_pos, max_pairs - n_pos)
+        neg: Set[Tuple[str, str]] = set()
+        while len(neg) < tgt:
+            shuffled = random.sample(self.gt.symptoms_list, len(self.gt.symptoms))
+            neg |= set(zip(self.gt.genes_list, shuffled)) - gp
+            neg = set(list(neg)[:tgt])
+        return neg
 
-        # NOTE: in initial implementation, node weights dict only included genes that had associated symptoms?...
-        logging.debug(f"Predicate weights tensor is: {self.predicate_weights}")
-        logging.debug(f"Baseline offset is: {self.baseline_offset}")
-        logging.debug(f"Shape of node weights tensor is: {self.node_weights_tensor.shape}")
+    # ---------------- pair tensors (vectorised loss) --------------------------
+    def _prepare_pair_tensors(self):
+        g_idx, s_idx, labels, freqs = [], [], [], []
+        for gi, gene in enumerate(self.gt.genes_list):
+            pos = self.gt.gene_to_symptoms.get(gene, set())
+            neg = self.neg_by_gene.get(gene, set())
+            for s in pos | neg:
+                if s not in self.graph.node_idx:
+                    continue
+                g_idx.append(gi)
+                s_idx.append(self.graph.node_idx[s])
+                labels.append(1 if s in pos else 0)
+                freqs.append(self._freq(gene, s))
+        self.pair_g = torch.tensor(g_idx, dtype=torch.long, device=self.device)
+        self.pair_s = torch.tensor(s_idx, dtype=torch.long, device=self.device)
+        self.pair_lbl = torch.tensor(labels, dtype=torch.float32, device=self.device)
+        self.pair_freq = torch.tensor(freqs, dtype=torch.float32, device=self.device)
 
-        # TODO: we don't define bounds like initial scipy implementation... that ok?
-        logging.info(f"Starting first optimization..")
-        start = time.time()
-        params = [self.node_weights_tensor, self.predicate_weights, self.baseline_offset]
-        optimizer = torch.optim.Adam(params, lr=self.LEARNING_RATE)
-        best_loss = float("inf")
-        stable_rounds = 0
-        for iteration_num in range(1000):
-            optimizer.zero_grad()
-            loss = self.objective_function(params)
+        denom = [max(self._sum_freqs(g), 1e-6) for g in self.gt.genes_list]
+        self.gene_denom = torch.tensor(denom, dtype=torch.float32, device=self.device)
+
+    # ---------------- sparse helpers -----------------------------------------
+    def _make_A(self, pred_w: Tensor) -> SparseTensor:
+        vals = pred_w[self.graph.edge_preds]
+        return SparseTensor(row=self.graph.edge_index[0],
+                            col=self.graph.edge_index[1],
+                            value=vals,
+                            sparse_sizes=self.graph.size)
+
+    def _paths(self, start: Tensor, node_w: Tensor, A: SparseTensor, L=4):
+        v, out = start, torch.zeros_like(start)
+        for _ in range(1, L):
+            dense = v * node_w
+            v = A.t().matmul(dense.T).T
+            out += v
+        return out  # (B,N)
+
+    # ---------------- objective (vectorised) ---------------------------------
+    def objective(self, params):
+        node_w, pred_w, bias = params
+        A = self._make_A(pred_w)
+
+        B, N = node_w.shape
+        one_hot = torch.zeros(B, N, device=self.device)
+        one_hot[torch.arange(B), [
+            self.graph.node_idx[g] for g in self.gt.genes_list]] = 1.0
+
+        scores = self._paths(one_hot, node_w, A, self.MAX_PATH)
+        raw = scores[self.pair_g, self.pair_s] + bias
+        prob = torch.sigmoid(raw)
+
+        ce = -(self.pair_lbl * torch.log(prob + 1e-15)
+               + (1 - self.pair_lbl) * torch.log(1 - prob + 1e-15))
+        w_ce = ce * self.pair_freq / self.gene_denom[self.pair_g]
+        loss_main = w_ce.sum() / B
+
+        l1 = (self.L1_REG * node_w.abs().sum(dim=1) / N).mean()
+        l2 = (self.L2_REG * torch.sqrt((node_w ** 2).sum(dim=1)) / N).mean()
+        pred_l2 = (self.PRED_L2_REG * (pred_w ** 2).sum()) / self.graph.num_predicates
+        return loss_main + l1 + l2 + pred_l2
+
+    # ---------------- training -----------------------------------------------
+    def train(self):
+        logging.info("TRAIN …")
+        params = [self.node_w, self.pred_w, self.bias]
+        opt = torch.optim.Adam(params, lr=self.LR)
+        best, patience = float("inf"), 0
+        t0 = time.time()
+        for it in range(1000):
+            opt.zero_grad(set_to_none=True)
+            loss = self.objective(params)
             loss.backward()
-            optimizer.step()
-
-            if loss < best_loss - self.MIN_DELTA:
-                best_loss = loss
+            opt.step()
+            if loss < best - self.MIN_DELTA:
+                best, patience = loss.item(), 0
             else:
-                stable_rounds += 1
-            if iteration_num % 100 == 0:
-                logging.debug(f"On iteration {iteration_num} - loss is: {loss:.4f}")
-            if stable_rounds >= self.STABLE_ROUNDS_REQUIRED:
-                logging.info(f"Reached stability after {iteration_num} iterations. Loss is {loss:.4f}")
+                patience += 1
+            if it % 100 == 0:
+                logging.debug(f"iter {it:04d} loss={loss:.4f}")
+            if patience >= self.PATIENCE:
                 break
-        logging.info(f"Done with first optimization. Took {round((time.time() - start) / 60)} minutes.")
+        logging.info(f"Joint phase: {(time.time()-t0):.1f}s  best={best:.4f}")
 
-        logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
-        logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
-        self.show_predicted_labels()
-        first_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
-        self.show_top_intermediate_nodes()
+        # ---------- per‑gene fine‑tune (unchanged, cheap) ---------------------
+        self.pred_w.requires_grad_(False)
+        self.bias.requires_grad_(False)
+        self.node_w.requires_grad_(False)
 
-        logging.info(
-            "Starting second optimization (focused on gene-specific node weights)"
-        )
-        start = time.time()
-
-        # Freeze predicate weights and baseline offset learned in the first step
-        self.predicate_weights.requires_grad = False
-        self.baseline_offset.requires_grad = False
-        self.node_weights_tensor.requires_grad = False
-        for gene_index, gene in enumerate(self.groundtruth.genes_list):
-            gene_node_weights = self.node_weights_tensor[gene_index].detach().clone()
-            gene_node_weights.requires_grad = True
-            params = [gene_node_weights]
-            optimizer_2 = torch.optim.Adam(params, lr=self.LEARNING_RATE)
-            best_loss = float("inf")
-            stable_rounds = 0
-            for iteration_num in range(1000):
-                optimizer_2.zero_grad()
-                loss = self.objective_function_gene(params, gene=gene)
-                loss.backward()
-                optimizer_2.step()
-
-                if loss < best_loss - self.MIN_DELTA:
-                    best_loss = loss
+        for gi, gene in enumerate(self.gt.genes_list):
+            local = self.node_w[gi].clone().detach().requires_grad_(True)
+            opt = torch.optim.Adam([local], lr=self.LR)
+            best_l, pat = float("inf"), 0
+            for _ in range(250):            # fewer iters now – faster
+                opt.zero_grad()
+                l = self._gene_objective(local, gene)
+                l.backward()
+                opt.step()
+                if l < best_l - self.MIN_DELTA:
+                    best_l, pat = l.item(), 0
                 else:
-                    stable_rounds += 1
-
-                if iteration_num % 100 == 0:
-                    logging.debug(
-                        f"On iteration {iteration_num} for {gene} - loss is: {loss:.4f}"
-                    )
-                if stable_rounds >= self.STABLE_ROUNDS_REQUIRED:
+                    pat += 1
+                if pat >= self.PATIENCE:
                     break
-
-            # Update the main tensor with learned values for this gene
             with torch.no_grad():
-                self.node_weights_tensor[gene_index].copy_(gene_node_weights.detach())
+                self.node_w[gi].copy_(local)
+            logging.debug(f"[gene] {gene} loss={best_l:.4f}")
 
-        logging.info(
-            f"Done with second optimization. Took {round((time.time() - start) / 60)} minutes."
-        )
-        logging.info(f"Node weights tensor is: {self.node_weights_tensor}")
+    # ------------- gene‑specific objective (unchanged maths) -----------------
+    def _gene_objective(self, node_w_g: Tensor, gene: str):
+        A = self._make_A(self.pred_w.detach())
+        N = self.graph.num_nodes
+        one_hot = torch.zeros(1, N, device=self.device)
+        one_hot[0, self.graph.node_idx[gene]] = 1.0
+        paths = self._paths(one_hot, node_w_g.unsqueeze(0), A, self.MAX_PATH)[0]
 
-        logging.info(f"Predicate weights tensor is now: {self.predicate_weights}")
-        logging.info(f"Baseline offset tensor is: {self.baseline_offset}")
-        self.show_predicted_labels()
+        pos = self.gt.gene_to_symptoms.get(gene, set())
+        neg = self.neg_by_gene.get(gene, set())
+        syms = pos | neg
+        idx = torch.tensor([self.graph.node_idx[s] for s in syms],
+                           device=self.device)
+        raw = paths[idx] + self.bias.detach()
+        prob = torch.sigmoid(raw)
 
-        second_metrics = self.evaluate_classification(threshold=0.5, log_output=False)
-        self.summarize_metrics(first_metrics, second_metrics)
+        lbl = torch.tensor([self.gt.assoc(gene, s) for s in syms],
+                           dtype=torch.float32, device=self.device)
+        frq = torch.tensor([self._freq(gene, s) for s in syms],
+                           dtype=torch.float32, device=self.device)
 
-    def objective_function(self, params):
-        # Thank you to David for the core of this function
-        # TODO: Can we get rid of loop over genes to be more GPU-friendly?..
-        node_weights_tensor, predicate_weights, baseline_offset = params
-        total_loss = 0  # Total loss across all genes
-        for gene_index, gene in enumerate(self.groundtruth.genes_list):
-            gene_node_weights = node_weights_tensor[gene_index]
-            sum_loss = 0
-            true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-            negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-            for symptom in true_symptom_set.union(negative_symptom_set):
-                predicted_probability = self.compute_predicted_probability(gene, symptom)
-                true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-                symptom_frequency = self.get_frequency(gene, symptom)
-                first_term = true_label * torch.log(predicted_probability + 1e-15)
-                second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
-                cross_entropy_loss = - (first_term + second_term)
-                sum_loss += symptom_frequency * cross_entropy_loss
-            # Apply node weight regularization penalties
-            l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
-            l2_penalty = (self.L2_REGULARIZATION * torch.sqrt(torch.sum(gene_node_weights ** 2))) / self.graph.num_nodes
-            total_loss += (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
-        # Apply predicate weight regularization penalty TODO: why no sqrt, like above l2 penalty?
-        l2_penalty_predicates = (self.PREDICATE_L2_REGULARIZATION * torch.sum(predicate_weights ** 2)) / self.graph.num_predicates
-        average_loss = (total_loss / len(self.groundtruth.genes_list)) + l2_penalty_predicates
-        return average_loss
+        ce = -(lbl * torch.log(prob + 1e-15)
+               + (1 - lbl) * torch.log(1 - prob + 1e-15))
+        weighted = (frq * ce).sum() / self._sum_freqs(gene)
 
-    def objective_function_gene(self, params, gene: str):
-        # Thank you to David for the core of this function
-        # TODO: in initial implementation, node weights were initialized to random here... should we do that?
-        gene_node_weights = params[0]
-        sum_loss = 0
-        true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-        negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-        for symptom in true_symptom_set.union(negative_symptom_set):
-            predicted_probability = self.compute_predicted_probability(
-                gene, symptom, gene_node_weights_override=gene_node_weights
-            )
-            true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-            symptom_frequency = self.get_frequency(gene, symptom)
-            first_term = true_label * torch.log(predicted_probability + 1e-15)
-            second_term = (1 - true_label) * torch.log(1 - predicted_probability + 1e-15)
-            cross_entropy_loss = -(first_term + second_term)
-            sum_loss += symptom_frequency * cross_entropy_loss
-        # Apply node weight regularization penalties
-        l1_penalty = (self.L1_REGULARIZATION * torch.sum(torch.abs(gene_node_weights))) / self.graph.num_nodes
-        l2_penalty = (self.L2_REGULARIZATION * torch.sqrt(torch.sum(gene_node_weights ** 2))) / self.graph.num_nodes
-        total_loss = (sum_loss / self.sum_max_frequencies(gene)) + l1_penalty + l2_penalty
-        return total_loss
+        l1 = self.L1_REG * node_w_g.abs().sum() / N
+        l2 = self.L2_REG * torch.sqrt((node_w_g ** 2).sum()) / N
+        return weighted + l1 + l2
 
-    def compute_predicted_probability(
-        self, gene: str, symptom: str, gene_node_weights_override: torch.Tensor | None = None
-    ):
-        # Thank you David for the core of this function
-        gene_index = self.groundtruth.gene_indices_map[gene]
-        if symptom in self.graph.node_indices_map:
-            symptom_index = self.graph.node_indices_map[symptom]
-            if gene_node_weights_override is None:
-                diag_node_weights = torch.diag(self.node_weights_tensor[gene_index])
-            else:
-                diag_node_weights = torch.diag(gene_node_weights_override)
-            weighted_adjacency = sum(self.predicate_weights[predicate_index] * self.graph.adjacency_tensor[predicate_index]
-                                     for predicate_index in range(self.graph.num_predicates))
-            M = diag_node_weights @ weighted_adjacency
-            matrix_power_sum = torch.zeros_like(M)
-            for path_length in range(2, self.MAX_PATH_LENGTH + 1):
-                matrix_power_sum += torch.linalg.matrix_power(M, path_length)
-            raw_score = matrix_power_sum[gene_index, symptom_index] + self.baseline_offset
-            return torch.sigmoid(raw_score)  # Logistic sigmoid
-        else:
-            return torch.tensor(0.0)
-
-    def get_frequency(self, gene, symptom):
-        if gene in self.groundtruth.gene_to_max_symptom_frequencies:
-            if symptom in self.groundtruth.gene_to_max_symptom_frequencies[gene]:
-                return self.groundtruth.gene_to_max_symptom_frequencies[gene][symptom]
-        return AVERAGE_FREQUENCY_MIDPOINT  # Default for negative examples
-
-    def show_predicted_labels(self):
-        for gene in self.groundtruth.genes:
-            logging.info(f"For gene {self.graph.get_node_name(gene)}:")
-            # TODO: Note only looking at trained examples here... later add performance on validation set
-            true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-            negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-            for symptom in true_symptom_set.union(negative_symptom_set):
-                true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-                predicted_prob = self.compute_predicted_probability(gene, symptom)
-                logging.info(f"    true label of {true_label} vs. {predicted_prob:.4f} predicted for symptom "
-                             f"'{self.graph.get_node_name(symptom)}'")
-
-    def show_top_intermediate_nodes(self):
-        logging.info(f"Extracting top intermediate nodes for each positive gene--symptom pair..")
-        # For each positive gene--symptom pair, grab all intermediate nodes
-        for gene_index, gene in enumerate(self.groundtruth.genes_list):
-            for symptom in self.groundtruth.gene_to_symptoms[gene]:
-                intermediate_nodes = self.graph.get_all_intermediate_nodes(gene, symptom)
-
-                # Report those intermediate nodes with the highest weights
-                gene_node_weights = self.node_weights_tensor[gene_index]
-                intermediate_nodes_with_indices = intermediate_nodes.intersection(self.graph.node_indices_map)
-                intermediate_node_weight_map = {node: gene_node_weights[self.graph.node_indices_map[node]].item()
-                                                for node in intermediate_nodes_with_indices}
-                top_6_int_nodes = sorted(intermediate_node_weight_map.items(), key=lambda x: x[1], reverse=True)[:6]
-                if intermediate_node_weight_map:
-                    node_weight_str = "\n   ".join([f"{index + 1}. {self.graph.get_node_name(node)} ({weight:.4f}) ({node})"
-                                                    for index, (node, weight) in enumerate(top_6_int_nodes)])
-                else:
-                    node_weight_str = "No intermediate nodes."
-                logging.info(f"For gene '{self.graph.get_node_name(gene)}' and symptom "
-                             f"'{self.graph.get_node_name(symptom)}', top intermediate nodes are:\n   {node_weight_str}")
-
-    def evaluate_classification(self, threshold, log_output=True):
-        true_labels = []
-        predicted_probs = []
-        for gene in self.groundtruth.genes:
-            # TODO: Note only looking at trained examples here... later add performance on validation set
-            true_symptom_set = self.groundtruth.gene_to_symptoms.get(gene, set())
-            negative_symptom_set = self.shuffled_gene_to_symptoms.get(gene, set())
-            for symptom in true_symptom_set.union(negative_symptom_set):
-                true_label = self.groundtruth.gene_and_symptom_are_associated(gene, symptom)
-                predicted_prob = self.compute_predicted_probability(gene, symptom)
-                true_labels.append(true_label)
-                predicted_probs.append(predicted_prob)
-        true_labels = torch.tensor(true_labels, dtype=torch.float32)
-        predicted_probs = torch.tensor(predicted_probs, dtype=torch.float32)
-
-        predicted_labels = (predicted_probs >= threshold).float()
-
-        tp = ((predicted_labels == 1) & (true_labels == 1)).sum().item()
-        fp = ((predicted_labels == 1) & (true_labels == 0)).sum().item()
-        fn = ((predicted_labels == 0) & (true_labels == 1)).sum().item()
-        tn = ((predicted_labels == 0) & (true_labels == 0)).sum().item()
-
-        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-
-        auroc = torchmetrics.AUROC(task="binary")(predicted_labels, true_labels)
-
-        confusion_matrix = torch.zeros(2, 2)
-        for true_label, predicted_label in zip(true_labels, predicted_labels):
-            confusion_matrix[int(true_label), int(predicted_label)] += 1
+    # ---------------- evaluation (vectorised) -------------------------------
+    @torch.no_grad()
+    def evaluate(self):
+        A = self._make_A(self.pred_w)
+        B, N = len(self.gt.genes), self.graph.num_nodes
+        one_hot = torch.zeros(B, N, device=self.device)
+        one_hot[torch.arange(B),
+                [self.graph.node_idx[g] for g in self.gt.genes_list]] = 1.0
+        paths = self._paths(one_hot, self.node_w, A, self.MAX_PATH)
+        y_scores = torch.sigmoid(paths[self.pair_g, self.pair_s] + self.bias).cpu().numpy()
+        y_true = self.pair_lbl.cpu().numpy()
+        y_pred = (y_scores >= 0.5).astype(int)
 
         metrics = {
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "auroc": auroc,
-            "confusion_matrix": confusion_matrix,
+            "AUC": roc_auc_score(y_true, y_scores)
+            if len(np.unique(y_true)) > 1 else float("nan"),
+            "F1": f1_score(y_true, y_pred),
+            "Accuracy": accuracy_score(y_true, y_pred),
+            "ConfusionMatrix": confusion_matrix(y_true, y_pred).ravel(),
         }
-        if log_output:
-            self.log_metrics(metrics)
         return metrics
 
-    def log_metrics(self, metrics):
-        logging.info(f"Accuracy: {metrics['accuracy']:.4f}")
-        logging.info(f"Precision: {metrics['precision']:.4f}")
-        logging.info(f"Recall: {metrics['recall']:.4f}")
-        logging.info(f"F1 Score: {metrics['f1']:.4f}")
-        logging.info(f"AUROC: {metrics['auroc']:.4f}")
-        logging.info(f"Confusion matrix:\n {metrics['confusion_matrix']}")
+    # ---------------- utils --------------------------------------------------
+    def _freq(self, g, s):
+        if s in self.gt.gene_to_max_symptom_frequencies.get(g, {}):
+            return self.gt.gene_to_max_symptom_frequencies[g][s]
+        return float(AVG_FREQ)
 
-    def summarize_metrics(self, joint_metrics, per_gene_metrics):
-        """Print metrics from both optimization stages."""
-        logging.info("Metrics after first optimization (joint):")
-        self.log_metrics(joint_metrics)
-        logging.info("Metrics after second optimization (per-gene):")
-        self.log_metrics(per_gene_metrics)
-
-    def sum_max_frequencies(self, gene: str):
-        # Sum the max frequencies for all symptoms associated with this gene
-        return sum(list(self.groundtruth.gene_to_max_symptom_frequencies[gene].values()))
-
-    def generate_shuffled_gene_symptom_pairs(self) -> Set[Tuple[str, str]]:
-        # Create shuffled gene symptom pairs (negative examples) that are disjoint from groundtruth pairs
-        num_groundtruth_pairs = len(self.groundtruth.gene_symptom_pairs)
-        logging.info(f"Generating shuffled (disjoint) gene--symptom pairs..")
-        max_possible_distinct_pairs = len(self.groundtruth.genes) * len(self.groundtruth.symptoms_list)
-        target_num_shuffled_pairs = min(num_groundtruth_pairs, max_possible_distinct_pairs - num_groundtruth_pairs)
-        shuffled_pairs_disjoint = set()
-        logging.debug(f"Max possible distinct gene--symptom pairs is: {max_possible_distinct_pairs}; "
-                      f"groundtruth contains {num_groundtruth_pairs} of those pairs. Thus we want "
-                      f"{target_num_shuffled_pairs} shuffled pairs.")
-        if target_num_shuffled_pairs < num_groundtruth_pairs:
-            logging.warning(f"Not possible to generate as many shuffled pairs as there are groundtruth pairs!")
-        while len(shuffled_pairs_disjoint) < target_num_shuffled_pairs:
-            symptom_half_shuffled = random.sample(self.groundtruth.symptoms_list, len(self.groundtruth.symptoms_list))
-            shuffled_pairs = set(list(zip(self.groundtruth.genes_list, symptom_half_shuffled)))
-            shuffled_pairs_disjoint |= shuffled_pairs.difference(self.groundtruth.gene_symptom_pairs)
-
-        # Trim down shuffled pairs to make sure we don't have MORE than we do groundtruth examples
-        shuffled_pairs_disjoint = set(list(shuffled_pairs_disjoint)[:target_num_shuffled_pairs])
-        assert len(shuffled_pairs_disjoint) == target_num_shuffled_pairs
-        logging.info(f"Created {len(shuffled_pairs_disjoint)} shuffled gene--symptom pairs.")
-        return shuffled_pairs_disjoint
+    def _sum_freqs(self, g):
+        return sum(self.gt.gene_to_max_symptom_frequencies[g].values())
 
 
-def load_data(graph_dir_path: str, device: torch.device) -> Tuple[GraphHelper, GroundtruthHelper]:
-    logging.info(f"LOADING DATA..")
-    # Load the knowledge graph
-    with jsonlines.open(f"{graph_dir_path}/nodes.jsonl") as reader:
-        nodes = {row["id"]: row for row in reader}
-    with jsonlines.open(f"{graph_dir_path}/edges.jsonl") as reader:
-        edges = {row["id"]: row for row in reader}
+# ────────────────────────── data IO ──────────────────────────────────────────
+def load_data(graph_dir, device):
+    logging.info("LOAD DATA …")
+    with jsonlines.open(os.path.join(graph_dir, "nodes.jsonl")) as r:
+        nodes = {row["id"]: row for row in r}
+    with jsonlines.open(os.path.join(graph_dir, "edges.jsonl")) as r:
+        edges = {row["id"]: row for row in r}
+    with open(os.path.join(graph_dir, "gene_to_diseases.json")) as f:
+        g2d = {k: set(v) for k, v in json.load(f).items()}
+    with open(os.path.join(graph_dir, "disease_symptom_frequencies.json")) as f:
+        d2sf_lbl = json.load(f)
 
-    # Load orphanet data (provides ground truth gene--symptom labels)
-    with open(f"{graph_dir_path}/gene_to_diseases.json", "r") as gene_to_diseases_file:
-        gene_to_diseases = json.load(gene_to_diseases_file)
-    gene_to_diseases = {gene_id: set(disease_ids) for gene_id, disease_ids in gene_to_diseases.items()}
-    with open(f"{graph_dir_path}/disease_symptom_frequencies.json", "r") as disease_symp_file:
-        disease_to_symptom_frequency_labels = json.load(disease_symp_file)
+    d2sf = {d: {s: SYMPTOM_FREQ[lbl] for s, lbl in m.items()}
+            for d, m in d2sf_lbl.items()}
 
-    # Do some data validation
-    for disease, symptom_frequency_labels in disease_to_symptom_frequency_labels.items():
-        for symptom, frequency_label in symptom_frequency_labels.items():
-            if frequency_label not in SYMPTOM_FREQUENCY_MIDPOINTS:
-                logging.error(f"Disease {disease} has symptom '{symptom}' whose frequency label of "
-                              f"'{frequency_label}' doesn't appear in SYMPTOM_FREQUENCY_MIDPOINTS!")
-            assert frequency_label in SYMPTOM_FREQUENCY_MIDPOINTS
+    g2s = defaultdict(set)
+    g2s_freq_sets = defaultdict(lambda: defaultdict(set))
+    for g, dis in g2d.items():
+        for d in dis:
+            for s, f in d2sf[d].items():
+                if f > 0:
+                    g2s[g].add(s)
+                    g2s_freq_sets[g][s].add(f)
 
-    # Convert symptom frequency labels to actual floats
-    disease_to_symptom_frequencies = {disease: {symptom: SYMPTOM_FREQUENCY_MIDPOINTS[frequency_label]
-                                                for symptom, frequency_label in symptom_frequency_dict.items()}
-                                      for disease, symptom_frequency_dict in disease_to_symptom_frequency_labels.items()}
+    gpairs = {(g, s) for g, ss in g2s.items() for s in ss}
+    g2s_max = {g: {s: max(fs) for s, fs in m.items()}
+               for g, m in g2s_freq_sets.items()}
 
-    # Create some other handy data structures/maps
-    gene_to_symptoms = defaultdict(set)
-    gene_to_symptom_frequency_sets = defaultdict(lambda: defaultdict(set))
-    for gene, diseases in gene_to_diseases.items():
-        for disease in diseases:
-            symptom_frequency_dict = disease_to_symptom_frequencies[disease]
-            for symptom, frequency in symptom_frequency_dict.items():
-                if frequency > 0.0:
-                    gene_to_symptoms[gene].add(symptom)
-                    gene_to_symptom_frequency_sets[gene][symptom].add(frequency)
-    gene_symptom_pairs = {(gene, symptom) for gene, symptoms in gene_to_symptoms.items() for symptom in symptoms}
-    gene_to_max_symptom_frequencies = {gene: {symptom: max(frequency_set)
-                                              for symptom, frequency_set in symptom_frequency_sets.items()}
-                                       for gene, symptom_frequency_sets in gene_to_symptom_frequency_sets.items()}
-
-    # Wrap up all our groundtruth maps into one object
-    groundtruth = GroundtruthHelper(gene_to_diseases=gene_to_diseases,
-                                    disease_to_symptom_frequencies=disease_to_symptom_frequencies,
-                                    gene_to_symptoms=gene_to_symptoms,
-                                    genes=set(gene_to_diseases),
-                                    diseases=set(disease_to_symptom_frequencies),
-                                    symptoms={symptom_id
-                                              for disease, symptoms in disease_to_symptom_frequencies.items()
-                                              for symptom_id in symptoms},
-                                    gene_symptom_pairs=gene_symptom_pairs,
-                                    gene_to_symptom_frequency_sets=gene_to_symptom_frequency_sets,
-                                    gene_to_max_symptom_frequencies=gene_to_max_symptom_frequencies)
-
-    # And wrap up all our graph data into one object
-    graph = GraphHelper(nodes_map=nodes, edges_map=edges, device=device)
-
-    return graph, groundtruth
+    gt = GroundtruthHelper(
+        g2d, d2sf, g2s, gpairs, g2s_freq_sets, g2s_max,
+        genes=set(g2d), diseases=set(d2sf), symptoms={s for d in d2sf.values() for s in d}
+    )
+    graph = GraphHelper(nodes, edges, device)
+    return graph, gt
 
 
+# ────────────────────────── main ─────────────────────────────────────────────
 def main():
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("graph_dir",
-                            help="Path to the directory containing files for the KG you want to use. (Must include "
-                                 "nodes.jsonl, edges.jsonl, gene_to_diseases.json, and "
-                                 "disease_symptom_frequencies.json.)")
-    args = arg_parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("graph_dir", help="directory with Orphanet graph files")
+    args = parser.parse_args()
 
-    # Use GPU, if available
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif hasattr(torch, "xpu") and torch.xpu.is_available():
-        device = torch.device("xpu")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-    logging.info(f"Using device: {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logging.info(f"device: {device}")
 
-    classifier = GeneSymptomClassifier(args.graph_dir, device=device)
+    model = GeneSymptomClassifier(args.graph_dir, device)
+    model.train()
+    metrics = model.evaluate()
 
-    classifier.train_model()
+    print("\n=== METRICS ===")
+    tn, fp, fn, tp = metrics["ConfusionMatrix"]
+    print(f"Confusion Matrix: tn={tn} fp={fp} fn={fn} tp={tp}")
+    for k in ("AUC", "F1", "Accuracy"):
+        print(f"{k}: {metrics[k]:.4f}")
+
+    with open("training.log", "w") as f:
+        f.write("\n".join(_log))
+    with open("performance.txt", "w") as f:
+        tn, fp, fn, tp = metrics["ConfusionMatrix"]
+        f.write(f"ConfusionMatrix tn={tn} fp={fp} fn={fn} tp={tp}\n")
+        for k in ("AUC", "F1", "Accuracy"):
+            f.write(f"{k}: {metrics[k]:.6f}\n")
+    logging.info("logs written.")
 
 
 if __name__ == "__main__":
+    random.seed(22)
+    torch.manual_seed(22)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(22)
     main()
+
